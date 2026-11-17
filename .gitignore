@@ -1,0 +1,35 @@
+build/
+out/
+*.bin
+*.o
+*.a
+*.spv.tmp
+.cache/
+.claude/
+
+# local review notes
+STATUS.local.md
+
+# per-machine notes (compositor tools, build boxes)
+CLAUDE.local.md
+
+# Notes on apps built with Baldr: they quote other people's products.
+docs/local/
+
+# Internal working notes: the design log, research, the open-work list and
+# proposals. The published docs are the guide, the widget table, the API
+# reference, the accessibility and audio docs, and CONTRIBUTING.md.
+docs/00-research.md
+docs/01-design.md
+docs/outstanding.md
+docs/todo.md
+docs/proposals/
+docs/requests/
+
+# The local working file; CONTRIBUTING.md is its public half.
+AGENTS.md
+CLAUDE.md
+
+# Candidate UI faces for trying with BALDR_UI_FONT; not shipped, since their
+# licence texts are not here. The embedded faces are in assets/fonts/.
+assets/fonts/candidates/

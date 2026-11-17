@@ -1,0 +1,92 @@
+# Type-check and test Baldr on Linux, Windows and macOS. The tests are
+# headless — no GPU or window — so they run on the hosted machines as they
+# do anywhere else.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  ODIN_RELEASE: dev-2026-11a # the oldest Odin this tree builds with; see README "Getting started"
+
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Odin
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download "$ODIN_RELEASE" --repo odin-lang/Odin --pattern '*linux-amd64*' --dir "$RUNNER_TEMP/dl"
+          mkdir -p "$RUNNER_TEMP/odin"
+          for f in "$RUNNER_TEMP"/dl/*; do
+            case "$f" in
+              *.zip) unzip -q "$f" -d "$RUNNER_TEMP/odin" ;;
+              *)     tar -xf "$f" -C "$RUNNER_TEMP/odin" ;;
+            esac
+          done
+          bin=$(find "$RUNNER_TEMP/odin" -type f -name odin -perm -u+x | head -1)
+          echo "$(dirname "$bin")" >> "$GITHUB_PATH"
+      - run: odin version
+      # The text tests draw Japanese, Korean, Hebrew, Arabic, Devanagari and
+      # Thai from the system's fonts, as an app does; Windows and macOS ship
+      # them, a bare Ubuntu image does not.
+      - name: Install fonts for other scripts
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends fonts-noto-core fonts-noto-cjk
+      - name: Check
+        run: ./build.sh check
+      - name: Test
+        run: ./build.sh test
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Odin
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download $env:ODIN_RELEASE --repo odin-lang/Odin --pattern '*windows-amd64*' --dir "$env:RUNNER_TEMP\dl"
+          Get-ChildItem "$env:RUNNER_TEMP\dl\*.zip" | ForEach-Object { Expand-Archive $_.FullName -DestinationPath "$env:RUNNER_TEMP\odin" }
+          $odin = Get-ChildItem "$env:RUNNER_TEMP\odin" -Recurse -Filter odin.exe | Select-Object -First 1
+          $odin.DirectoryName | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+      - run: odin version
+      - name: Test
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force build | Out-Null
+          odin test baldr -collection:baldr=. -out:build\baldr_test.exe
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          odin test platform\win32 -collection:baldr=. -out:build\win32_test.exe
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          odin test audio -collection:baldr=. -out:build\audio_test.exe
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Odin
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download "$ODIN_RELEASE" --repo odin-lang/Odin --pattern '*macos-arm64*' --dir "$RUNNER_TEMP/dl"
+          mkdir -p "$RUNNER_TEMP/odin"
+          for f in "$RUNNER_TEMP"/dl/*; do
+            case "$f" in
+              *.zip) unzip -q "$f" -d "$RUNNER_TEMP/odin" ;;
+              *)     tar -xf "$f" -C "$RUNNER_TEMP/odin" ;;
+            esac
+          done
+          xattr -dr com.apple.quarantine "$RUNNER_TEMP/odin" 2>/dev/null || true
+          bin=$(find "$RUNNER_TEMP/odin" -type f -name odin -perm -u+x | head -1)
+          echo "$(dirname "$bin")" >> "$GITHUB_PATH"
+      - run: odin version
+      - name: Check
+        run: ./build.sh check
+      - name: Test
+        run: ./build.sh test

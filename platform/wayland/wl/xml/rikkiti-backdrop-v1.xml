@@ -1,0 +1,157 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<protocol name="rikkiti_backdrop_v1">
+  <copyright>
+    Copyright © 2026 the Rikkiti OS contributors
+
+    This software is provided 'as-is', without any express or implied warranty. In no event
+    will the authors be held liable for any damages arising from the use of this software.
+
+    Permission is granted to anyone to use this software for any purpose, including
+    commercial applications, and to alter it and redistribute it freely, subject to the
+    following restrictions:
+
+    1. The origin of this software must not be misrepresented; you must not claim that you
+       wrote the original software. If you use this software in a product, an acknowledgment
+       in the product documentation would be appreciated but is not required.
+    2. Altered source versions must be plainly marked as such, and must not be
+       misrepresented as being the original software.
+    3. This notice may not be removed or altered from any source distribution.
+  </copyright>
+
+  <description summary="how bright the backdrop behind a translucent surface is">
+    A client that draws see-through (glass) surfaces over the desktop can't know what shows
+    through them: the wallpaper, a window moving behind, another layer. Fixed text colours
+    that read over one backdrop don't read over another.
+
+    This protocol lets the compositor tell a client how bright the backdrop behind one of its
+    surfaces is, so the client can choose its text colour and how much tint to add for text
+    to stay readable. It is meant to be used together with a background effect (blur) on
+    the same surface, but doesn't require one.
+
+    Rikkiti OS uses it for the panel's glass levels (docs/panel-v2-plan.md §3.6) through the
+    Baldr toolkit (docs/baldr-requests/038), since version 2 for text drawn straight on the
+    desktop (docs/baldr-requests/212), and since version 3 cell by cell, so each piece of that text
+    can read what is behind it (docs/baldr-requests/213).
+  </description>
+
+  <interface name="rikkiti_backdrop_manager_v1" version="3">
+    <description summary="creates backdrop objects for surfaces">
+      A global the client binds to ask about the backdrops of its surfaces.
+    </description>
+
+    <enum name="error">
+      <entry name="backdrop_exists" value="0"
+        summary="the surface already has a rikkiti_backdrop_v1 object"/>
+    </enum>
+
+    <request name="destroy" type="destructor">
+      <description summary="destroy the manager">
+        Existing rikkiti_backdrop_v1 objects are not affected.
+      </description>
+    </request>
+
+    <request name="get_backdrop">
+      <description summary="watch the backdrop behind a surface">
+        Creates an object that reports the brightness of what is behind the surface. A
+        surface may have only one; asking for a second is the backdrop_exists error.
+      </description>
+      <arg name="id" type="new_id" interface="rikkiti_backdrop_v1"/>
+      <arg name="surface" type="object" interface="wl_surface"/>
+    </request>
+  </interface>
+
+  <interface name="rikkiti_backdrop_v1" version="3">
+    <description summary="the brightness of the backdrop behind one surface">
+      Reports the relative luminance of the content that shows through the surface: whatever
+      the compositor renders below it within the surface's own bounds (for a popup, the popup's,
+      not its parent's), after the blur the surface's
+      background effect applies (or a comparable blur when there is none, unless the client
+      asked for measure_as_shown), before the surface's own pixels.
+
+      Luminance is relative luminance as used by WCAG contrast (linear-light sRGB, weighted
+      0.2126 R, 0.7152 G, 0.0722 B), scaled so 0 is black and 65535 is white.
+
+      The compositor sends a luminance event soon after the object is created and the surface
+      is mapped, and again whenever the backdrop changes enough to matter: the wallpaper
+      changes, a window moves or appears behind the surface, the surface moves, is resized or
+      is re-anchored, a workspace switches. It should not send more than about four events a second for one surface. While
+      the backdrop is animating it may wait and send only the settled values.
+
+      When the surface is unmapped, no events are sent until it is mapped again.
+    </description>
+
+    <request name="destroy" type="destructor">
+      <description summary="stop reporting">
+        No more events are sent for this surface.
+      </description>
+    </request>
+
+    <event name="luminance">
+      <description summary="the backdrop's brightness range">
+        The darkest, average and brightest luminance of the blurred backdrop (or, after
+        measure_as_shown, the backdrop as it shows) behind the surface, sampled over its bounds
+        at a resolution the compositor chooses (cells of about 10 to 20 logical pixels are
+        enough). A client that needs text to read everywhere on the surface checks its colours
+        against min and max.
+      </description>
+      <arg name="min" type="uint" summary="darkest luminance, 0 to 65535"/>
+      <arg name="avg" type="uint" summary="average luminance, 0 to 65535"/>
+      <arg name="max" type="uint" summary="brightest luminance, 0 to 65535"/>
+    </event>
+
+    <request name="measure_as_shown" since="2">
+      <description summary="report the backdrop without the blur">
+        From now on, the backdrop is measured as it shows, without any blur: for a surface
+        whose own pixels sit straight on what is behind it (text on the desktop), where the
+        contrast that matters is at the size of a letter, which a blur hides. The cells are
+        still averaged, but about the size of a letter (around 6 logical pixels), so a patch as
+        wide as a letter is seen rather than lost in a cell it half covers. A luminance event
+        follows with the new values. There is no way back short of destroying the object.
+      </description>
+    </request>
+
+    <request name="watch_map" since="3">
+      <description summary="also report the backdrop cell by cell">
+        From now on the backdrop also comes as a map: its brightness cell by cell over the part of
+        the surface that is on screen, measured as the luminance event's numbers are (blurred, or
+        as shown after measure_as_shown), in the same cells. One min/avg/max can't serve text over a
+        wallpaper that runs from light to dark under it; with the map, each piece of text can take
+        the colour that reads over what is behind that piece.
+
+        A map is map_begin, then map_rows until every row has come, then map_done. One follows soon
+        after this request, and another whenever the map changes enough to matter, at the same
+        pace as the luminance events (with one, or alone when only the map moved).
+      </description>
+    </request>
+
+    <event name="map_begin" since="3">
+      <description summary="a map of the backdrop starts">
+        The map's size and where it lies on the surface: columns × rows cells of `cell` logical
+        pixels square (the last column and row may be cut short by the edge), the first cell's
+        top-left corner at x, y in surface-local logical pixels (not 0, 0 when the surface is partly
+        off screen: only what is shown is measured).
+      </description>
+      <arg name="columns" type="uint" summary="cells across"/>
+      <arg name="rows" type="uint" summary="cells down"/>
+      <arg name="cell" type="uint" summary="a cell's side, in logical pixels"/>
+      <arg name="x" type="int" summary="the map's left edge, surface-local logical pixels"/>
+      <arg name="y" type="int" summary="the map's top edge, surface-local logical pixels"/>
+    </event>
+
+    <event name="map_rows" since="3">
+      <description summary="some of the map's rows">
+        Rows first_row onward, `columns` bytes each, as many whole rows as the array holds. A byte
+        is a cell's relative luminance written as the 8-bit sRGB grey of the same brightness: 0 is
+        black, 255 white, and a client wanting WCAG luminance decodes it with the sRGB curve.
+      </description>
+      <arg name="first_row" type="uint" summary="the first row in this event"/>
+      <arg name="cells" type="array" summary="columns bytes per row, row after row"/>
+    </event>
+
+    <event name="map_done" since="3">
+      <description summary="the map is complete">
+        Every row of the map started by the last map_begin has been sent.
+      </description>
+    </event>
+  </interface>
+</protocol>

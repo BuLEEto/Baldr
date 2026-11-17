@@ -1,0 +1,262 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<protocol name="rikkiti_applet_v1">
+  <copyright>
+    Copyright © 2026 the Rikkiti OS contributors
+
+    This software is provided 'as-is', without any express or implied warranty. In no event
+    will the authors be held liable for any damages arising from the use of this software.
+
+    Permission is granted to anyone to use this software for any purpose, including
+    commercial applications, and to alter it and redistribute it freely, subject to the
+    following restrictions:
+
+    1. The origin of this software must not be misrepresented; you must not claim that you
+       wrote the original software. If you use this software in a product, an acknowledgment
+       in the product documentation would be appreciated but is not required.
+    2. Altered source versions must be plainly marked as such, and must not be
+       misrepresented as being the original software.
+    3. This notice may not be removed or altered from any source distribution.
+  </copyright>
+
+  <description summary="applets from other programs, embedded in a shell's bars">
+    A desktop shell draws its bars as layer surfaces. Third-party applets are separate
+    programs with their own surfaces. This protocol lets the compositor place an applet's
+    surface inside a bar, at a slot the shell has reserved, so that the applet looks like part
+    of the bar (behind the same glass), receives pointer and keyboard input directly, and opens
+    its own popups, without the shell having to act as a compositor for it.
+
+    The flow:
+    - The shell creates a slot on one of its bar surfaces with rikkiti_applet_host_v1 and
+      receives a token.
+    - It starts the applet with that token (by convention in the RIKKITI_APPLET_TOKEN
+      environment variable).
+    - The applet creates a wl_surface, asks rikkiti_applet_manager_v1 for an applet object
+      with the token, and draws at the size it is configured to. It may say what size it would
+      like; the shell decides.
+    - The compositor shows the applet's surface at the slot, clipped to it.
+    - When the applet's surface or connection goes away, the shell is told and receives a new
+      token; the slot stays empty until an applet binds again. An applet never breaks a bar.
+
+    Its first user is a desktop shell that hosts third-party panel applets.
+    This is a draft of version 1 (second revision, after a review from the Baldr toolkit's
+    side): it may change before it is frozen.
+  </description>
+
+  <interface name="rikkiti_applet_host_v1" version="1">
+    <description summary="for the shell: reserve slots for applets in its bars">
+      A global for the shell. A client may create slots only on its own layer surfaces.
+    </description>
+
+    <enum name="error">
+      <entry name="invalid_host" value="0"
+        summary="the host surface isn't a layer surface of this client"/>
+      <entry name="invalid_geometry" value="1"
+        summary="the slot has no area, or a negative size"/>
+      <entry name="invalid_edge" value="2" summary="the edge isn't one of the edge values"/>
+    </enum>
+
+    <enum name="edge">
+      <description summary="the screen edge the bar is on">
+        Tells an applet which way its bar runs (top and bottom bars are horizontal, left and
+        right ones vertical) and which way its popups should open.
+      </description>
+      <entry name="top" value="0"/>
+      <entry name="bottom" value="1"/>
+      <entry name="left" value="2"/>
+      <entry name="right" value="3"/>
+    </enum>
+
+    <request name="destroy" type="destructor">
+      <description summary="destroy the host object">
+        Existing slots are not affected.
+      </description>
+    </request>
+
+    <request name="create_slot">
+      <description summary="reserve a slot in a bar">
+        Reserves a rectangle of the host surface, in its surface-local coordinates, for one
+        applet. A token event follows at once.
+      </description>
+      <arg name="id" type="new_id" interface="rikkiti_applet_slot_v1"/>
+      <arg name="host" type="object" interface="wl_surface" summary="one of this client's layer surfaces"/>
+      <arg name="x" type="int"/>
+      <arg name="y" type="int"/>
+      <arg name="width" type="int"/>
+      <arg name="height" type="int"/>
+      <arg name="edge" type="uint" enum="edge" summary="the edge the bar is on"/>
+    </request>
+  </interface>
+
+  <interface name="rikkiti_applet_slot_v1" version="1">
+    <description summary="a place in a bar for one applet">
+      The shell's handle on one slot. At most one applet is bound to a slot at a time.
+    </description>
+
+    <request name="destroy" type="destructor">
+      <description summary="remove the slot">
+        The applet bound to it, if any, receives rikkiti_applet_v1.closed and is no longer
+        shown. The host surface being destroyed has the same effect on its slots.
+      </description>
+    </request>
+
+    <request name="set_geometry">
+      <description summary="move or resize the slot">
+        Takes effect with the host surface's next commit, so the bar and the applet move
+        together. A bound applet is configured to a new size or edge, and its reactive popups
+        are placed again (see rikkiti_applet_v1.get_popup). An edge that isn't one of the edge
+        values leaves the edge as it was.
+      </description>
+      <arg name="x" type="int"/>
+      <arg name="y" type="int"/>
+      <arg name="width" type="int"/>
+      <arg name="height" type="int"/>
+      <arg name="edge" type="uint" enum="rikkiti_applet_host_v1.edge"/>
+    </request>
+
+    <event name="token">
+      <description summary="the token an applet binds with">
+        Sent when the slot is created, and again after an applet detaches. A token is used
+        once and belongs to this slot only. It is an opaque string; give it to the applet to
+        start, and nothing else.
+      </description>
+      <arg name="token" type="string"/>
+    </event>
+
+    <event name="attached">
+      <description summary="an applet has bound to the slot">
+        Sent when an applet binds the slot's token.
+      </description>
+      <arg name="pid" type="uint" summary="the applet's process id, or 0 when unknown"/>
+    </event>
+
+    <event name="detached">
+      <description summary="the applet has gone">
+        The applet's surface, its applet object or its connection went away. The slot is empty
+        and shows nothing; a token event with a new token follows.
+      </description>
+    </event>
+
+    <event name="size_hint">
+      <description summary="the size the applet would like">
+        Relays rikkiti_applet_v1.set_size_hint: the applet's minimum and preferred length along
+        the bar (its width in a top or bottom bar, its height in a left or right one), in
+        surface-local units; 0 means no preference. The shell may give it any size, with
+        set_geometry.
+      </description>
+      <arg name="min" type="uint"/>
+      <arg name="preferred" type="uint"/>
+    </event>
+  </interface>
+
+  <interface name="rikkiti_applet_manager_v1" version="1">
+    <description summary="for applets: become part of a bar">
+      A global for applets.
+    </description>
+
+    <enum name="error">
+      <entry name="role" value="0" summary="the surface already has another role"/>
+      <entry name="already_constructed" value="1" summary="the surface already has an applet object"/>
+    </enum>
+
+    <request name="destroy" type="destructor">
+      <description summary="destroy the manager">
+        Existing applet objects are not affected.
+      </description>
+    </request>
+
+    <request name="get_applet">
+      <description summary="bind a surface to a slot">
+        Gives the surface the applet role. A token that is unknown, used already or belongs to
+        a slot that has gone is not an error: the applet object receives closed at once, so a
+        restarted applet holding a stale token exits cleanly.
+      </description>
+      <arg name="id" type="new_id" interface="rikkiti_applet_v1"/>
+      <arg name="surface" type="object" interface="wl_surface"/>
+      <arg name="token" type="string"/>
+    </request>
+  </interface>
+
+  <interface name="rikkiti_applet_v1" version="1">
+    <description summary="an applet surface in a bar">
+      An applet is configured to its slot's size and its bar's edge. It must acknowledge the
+      configure and commit a buffer of that size (in surface-local units); anything beyond the
+      slot is clipped. It is shown once it has committed a buffer after its first acknowledged
+      configure. It receives pointer input where it is shown, and keyboard focus when clicked
+      (see set_keyboard_interactivity). Its surface's scale and output follow the bar's.
+    </description>
+
+    <enum name="error">
+      <entry name="invalid_popup" value="0"
+        summary="the popup already has a parent, or isn't an xdg_popup with a NULL parent"/>
+      <entry name="invalid_keyboard_interactivity" value="1"
+        summary="the value isn't one of the keyboard_interactivity values"/>
+    </enum>
+
+    <enum name="keyboard_interactivity">
+      <entry name="none" value="0" summary="the applet never takes keyboard focus"/>
+      <entry name="on_demand" value="1" summary="the applet takes keyboard focus when clicked"/>
+    </enum>
+
+    <request name="destroy" type="destructor">
+      <description summary="leave the bar">
+        The surface is no longer shown and the slot is told the applet detached.
+      </description>
+    </request>
+
+    <request name="ack_configure">
+      <description summary="acknowledge a configure">
+        The next commit applies the configure with this serial.
+      </description>
+      <arg name="serial" type="uint"/>
+    </request>
+
+    <request name="set_size_hint">
+      <description summary="say what length along the bar the applet would like">
+        The minimum and preferred length along the bar (width in a top or bottom bar, height in
+        a left or right one), 0 for no preference. The compositor passes it to the shell
+        (rikkiti_applet_slot_v1.size_hint), which decides; a new size arrives as a configure.
+      </description>
+      <arg name="min" type="uint"/>
+      <arg name="preferred" type="uint"/>
+    </request>
+
+    <request name="set_keyboard_interactivity">
+      <description summary="whether the applet takes keyboard focus">
+        on_demand (the default): a click on the applet gives it keyboard focus, as with a layer
+        surface's on_demand, for applets with text fields or shortcuts. none: it never takes
+        focus; switching to none while it has focus (on Escape, say) returns focus to the
+        window on top. A popup that grabs takes keyboard focus as any xdg_popup does,
+        whichever the setting.
+      </description>
+      <arg name="keyboard_interactivity" type="uint" enum="keyboard_interactivity"/>
+    </request>
+
+    <request name="get_popup">
+      <description summary="make an xdg_popup a child of the applet">
+        As zwlr_layer_surface_v1.get_popup: the popup is created with a NULL parent through
+        xdg_surface.get_popup, then made the applet's child here, before its first commit.
+        Its positioner's anchor rectangle is relative to the applet surface, and it is kept
+        on the bar's output. A grab needs the serial of input the applet received; a press on
+        anything outside the applet's popups, the bar around it included, dismisses them.
+        When the slot moves, a popup whose positioner is reactive is placed again and receives
+        a new configure.
+      </description>
+      <arg name="popup" type="object" interface="xdg_popup"/>
+    </request>
+
+    <event name="configure">
+      <description summary="the size to draw at, and the bar's edge"/>
+      <arg name="serial" type="uint"/>
+      <arg name="width" type="uint"/>
+      <arg name="height" type="uint"/>
+      <arg name="edge" type="uint" enum="rikkiti_applet_host_v1.edge"/>
+    </event>
+
+    <event name="closed">
+      <description summary="the applet isn't shown and won't be">
+        The slot was removed, or the token wasn't valid. The client should destroy the object
+        (and usually exit); nothing it commits is shown.
+      </description>
+    </event>
+  </interface>
+</protocol>
