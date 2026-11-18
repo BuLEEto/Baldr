@@ -1730,11 +1730,9 @@ span_hit_disp :: proc(t: ^Tree, s: ^Text_Area_State, b: int, sp: Line_Span, x: f
 	str := area_text(t, s, b)
 	bounds := make([dynamic]int, 0, 16, context.temp_allocator)
 	append(&bounds, sp.start)
-	// One iterator over this line's own bytes, not `grapheme_next` per step,
-	// which iterates from the start of the whole block each call
-	// (O(line × block)). A span's ends are cluster boundaries, so the slice
-	// can be iterated alone: context rules (regional indicators, ZWJ) only
-	// join within a cluster.
+	// One iterator over this line's own bytes. A span's ends are cluster
+	// boundaries, so the slice can be iterated alone: context rules
+	// (regional indicators, ZWJ) only join within a cluster.
 	if sp.end > sp.start {
 		it := runa.grapheme_iter_make(str[sp.start:sp.end])
 		for {

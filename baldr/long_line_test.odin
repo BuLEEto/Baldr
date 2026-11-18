@@ -4,13 +4,10 @@ package baldr
 @(require) import "core:testing"
 @(require) import "core:time"
 
-// A pointer move over a long line costs O(line), not O(line × block).
-//
-// `grapheme_next(str, i)` iterates from the start of `str` on every call, so
-// `span_hit_disp` walks the span's own bytes once rather than stepping
-// through the whole block. One test pins that this is correct (a span is cut
-// between clusters), the other that a drag across a 2,000-character line
-// stays well inside a frame.
+// A pointer move over a long line costs O(line), not O(line × block):
+// `span_hit_disp` walks the span's own bytes once. One test pins that this
+// is correct (a span is cut between clusters), the other that a drag across
+// a 2,000-character line stays well inside a frame.
 when ODIN_TEST || #config(BALDR_TESTS, false) {
 
 @(private = "file")
@@ -87,12 +84,13 @@ clicking_a_line_of_clusters_never_lands_inside_one :: proc(t: ^testing.T) {
 	testing.expectf(t, checked > 20, "enough clicks landed in the text to mean anything (%d)", checked)
 }
 
-// An absolute budget, not a ratio: a whole-block walk slows the long and the
-// short line alike, so their ratio hides it. 2 ms leaves a slow machine wide
-// headroom over a linear walk and still fails a whole-block one.
+// Absolute budgets, not a ratio: a walk from the block's start slows the
+// long and the short line alike, so their ratio hides it. That walk costs
+// about 500 ms a move unwrapped and 13 ms wrapped, against under 1 ms and
+// 0.1 ms in a debug build here, so the budgets fail it many times over and
+// leave a slow shared machine wide room.
 @(test)
 dragging_across_a_long_line_stays_inside_a_frame :: proc(t: ^testing.T) {
-	BUDGET_MS :: 2.0
 	sql := strings.repeat("SELECT a, b, c FROM t WHERE x = 1 AND y = 2 ", 46) // ~2,000 chars, one line
 	defer delete(sql)
 	doc := document_make(sql)
@@ -106,7 +104,8 @@ dragging_across_a_long_line_stays_inside_a_frame :: proc(t: ^testing.T) {
 		ms := ll_drag_ms(&ui, ed, 40)
 		// Without wrap the line is one span, so the walk is the whole 2,000
 		// characters: linear, which is right.
-		testing.expectf(t, ms < BUDGET_MS, "wrap=%v: %.3f ms a pointer move, over the %.1f ms budget", wrap, ms, BUDGET_MS)
+		budget := 3.0 if wrap else 25.0
+		testing.expectf(t, ms < budget, "wrap=%v: %.3f ms a pointer move, over the %.1f ms budget", wrap, ms, budget)
 	}
 }
 
