@@ -226,6 +226,8 @@ atspi_role :: proc(r: A11y_Role) -> atspi.Role {
 	case .Menu_Bar:      return .Menu_Bar
 	case .Menu:          return .Menu
 	case .Menu_Item:     return .Menu_Item
+	case .Check_Menu_Item: return .Check_Menu_Item
+	case .Radio_Menu_Item: return .Radio_Menu_Item
 	case .Dialog:        return .Dialog
 	case .Alert:         return .Notification
 	case .Status_Bar:    return .Status_Bar

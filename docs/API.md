@@ -4132,6 +4132,22 @@ code_bar_key :: proc(ui: ^Ui($Msg), key: Key, mods: Mods) -> bool
 
 code_bar_key: keys in the bar's field — Enter steps / jumps, Escape closes.
 
+### `editor_bar`
+
+```odin
+editor_bar :: proc(ui: ^Ui($Msg), n: Node, bar: Code_Bar)
+```
+
+editor_bar opens a code editor's Find, Replace or Go to Line bar as its key does (Ctrl+F, Ctrl+H, Ctrl+G): the field focused and its text selected, the query seeded from a one-line selection. `.None` closes it as Escape does, with the keyboard back in the code. `n` is what code_editor returned; on any other node it does nothing. For a toolbar button or a menu item; editor_bar_shown says which bar is open.
+
+### `editor_bar_shown`
+
+```odin
+editor_bar_shown :: proc(t: ^Tree, n: Node) -> Code_Bar
+```
+
+editor_bar_shown is the code editor's open bar, .None when none is or `n` is not a code editor. Read it in the view: the editor's own keys open and close the bar without the app hearing.
+
 ### `code_tick`
 
 ```odin
@@ -5624,7 +5640,7 @@ menu_item :: proc(ui: ^Ui($Msg), label: string, on_click: Msg, shortcut: string 
 	icon: Icon = .None, theme_icon := "", checked: Maybe(bool) = nil, radio := false, tag: u64 = 0, key: u64 = 0, loc := #caller_location) -> Node
 ```
 
-menu_item is one row of a menu: label left, optional shortcut hint right. Activating it (click, Enter, Space) queues `on_click` and closes the menu. `checked` (a bool, or nil for a plain item) shows a check mark — or a dot when `radio` — in a leading slot and sets the Checked state; give the plain items of such a menu `checked = false` so their labels line up. `icon` or `theme_icon` (an icon theme name: a jump-list action's Icon=, a dbusmenu icon-name) goes before the label.
+menu_item is one row of a menu: label left, optional shortcut hint right. Activating it (click, Enter, Space) queues `on_click` and closes the menu. `checked` (a bool, or nil for a plain item) makes it a toggle: a box, ticked or empty, in a leading slot, or a dot when `radio` (an unpicked radio item shows nothing). `icon` or `theme_icon` (an icon theme name: a jump-list action's Icon=, a dbusmenu icon-name) takes the slot on an item that is not a toggle. Once any row of a menu fills its slot, every label starts after one.
 
 ### `submenu`
 
@@ -9448,6 +9464,8 @@ Node_Flag :: enum u8 {
 	Focusable,
 	Keys_Only_Focus,   // Tab reaches it, a press does not: a tool button, a toolbar, a transport (button_options focus_on_click = false)
 	Pointer_Only_Focus, // the mirror: a press focuses it, Tab passes it by — a read-only paragraph a chat has hundreds of (Qt's ClickFocus, HTML's tabindex=-1)
+	Check_Item,        // a menu item that ticks: readers hear a check menu item, ticked or not
+	Radio_Item,        // …one of a set, picked or not
 	// interaction
 	Hovered,
 	Pressed,

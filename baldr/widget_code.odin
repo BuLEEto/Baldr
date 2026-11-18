@@ -59,6 +59,7 @@ Code_State :: struct {
 	current:   int,  // the current match (-1 = none)
 	search_from: Pos, // where the caret was when the bar opened: typing the query picks the match from here
 	select_current: bool, // the next build selects the current match
+	focus_field: bool,    // the next build puts the keyboard in the bar's field
 	field:     Node, // the bar's text field (NONE when closed)
 	field2:    Node, // the replace field
 	frame:     Node, // the column holding the bar and the area
@@ -200,8 +201,10 @@ code_bar_build :: proc(ui: ^Ui($Msg), area: Node, s: ^Text_Area_State, loc: runt
 		code_bar_text_button(ui, area, "All", 5, 13, loc)
 		end(ui)
 	}
-	if c.select_current && c.field != NODE_NONE { // freshly opened: type straight away
+	if c.focus_field && c.field != NODE_NONE { // opened or asked for again: typing replaces the query
+		c.focus_field = false
 		ui.pending_focus = c.field
+		text_input_select_all(t, c.field)
 	}
 	end(ui) // box
 }
@@ -308,25 +311,48 @@ code_bar_key :: proc(ui: ^Ui($Msg), key: Key, mods: Mods) -> bool {
 	return false
 }
 
+// editor_bar opens a code editor's Find, Replace or Go to Line bar as its
+// key does (Ctrl+F, Ctrl+H, Ctrl+G): the field focused and its text
+// selected, the query seeded from a one-line selection. `.None` closes it
+// as Escape does, with the keyboard back in the code. `n` is what
+// code_editor returned; on any other node it does nothing. For a toolbar
+// button or a menu item; editor_bar_shown says which bar is open.
+editor_bar :: proc(ui: ^Ui($Msg), n: Node, bar: Code_Bar) {
+	area := n
+	if a, has := ui.tree.area_of_frame[n]; has do area = a
+	s := &ui.tree.areas[area]
+	if s == nil || !s.code.on do return
+	if bar == .None { code_bar_close(ui, area, s) } else { code_bar_open(ui, area, s, bar) }
+}
+
+// editor_bar_shown is the code editor's open bar, .None when none is or `n`
+// is not a code editor. Read it in the view: the editor's own keys open and
+// close the bar without the app hearing.
+editor_bar_shown :: proc(t: ^Tree, n: Node) -> Code_Bar {
+	area := n
+	if a, has := t.area_of_frame[n]; has do area = a
+	s := &t.areas[area]
+	if s == nil || !s.code.on do return .None
+	return s.code.bar
+}
+
+// code_bar_open opens a bar, or goes back to the one already open: either
+// way the field takes the keyboard with its text selected.
 @(private)
 code_bar_open :: proc(ui: ^Ui($Msg), area: Node, s: ^Text_Area_State, which: Code_Bar) {
-	t := &ui.tree
 	c := &s.code
-	if c.bar == which do return
+	fresh := c.bar != which
 	c.bar = which
-	c.select_current = true
+	c.focus_field = true
 	c.search_from, _ = pos_order(s.caret, s.anchor) // the selection's start, or the caret
-	if which == .Find || which == .Replace { // seed the query with the selection when it is one line
+	if which == .Find || which == .Replace {
+		c.match_valid = false // the current match is found again from here
 		lo, hi := pos_order(s.caret, s.anchor)
-		if lo != hi && lo.block == hi.block {
-			text_set(&c.query, block_str(s.doc, lo.block)[lo.off:hi.off])
-			c.match_valid = false
-		}
-	} else {
+		if lo != hi && lo.block == hi.block do text_set(&c.query, block_str(s.doc, lo.block)[lo.off:hi.off])
+	} else if fresh {
 		text_set(&c.goto_text, "")
 	}
 	ask_rebuild(ui)
-	_ = t
 }
 
 @(private)
@@ -404,13 +430,14 @@ code_find_compute :: proc(t: ^Tree, s: ^Text_Area_State) {
 			}
 		}
 		// the current match: the first at or after where the search started
-		// (a new query keeps that anchor; an edit moves on from the caret)
+		// (a new query keeps that anchor; an edit moves on from the caret).
+		// Only a new query selects it: an edit is someone typing in the code.
 		from := s.caret if query_same else c.search_from
 		c.current = -1
 		if len(c.matches) > 0 {
 			c.current = 0
 			for m, i in c.matches do if !pos_less(m[0], from) { c.current = i; break }
-			c.select_current = true
+			if !query_same do c.select_current = true
 		}
 	}
 }

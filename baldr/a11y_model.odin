@@ -75,6 +75,8 @@ A11y_Role :: enum u8 {
 	Menu_Bar,
 	Menu,
 	Menu_Item,
+	Check_Menu_Item, // a menu item that ticks, ticked or not
+	Radio_Menu_Item, // …one of a set
 	Dialog,
 	Alert,
 	Status_Bar,
@@ -1029,6 +1031,9 @@ a11y_role_of :: proc(t: ^Tree, n: Node, d: ^Node_Data) -> A11y_Role {
 	case .Text_Input, .Search_Box:
 		if _, is_area := t.areas[n]; is_area do return .Document
 		if s, is_input := t.inputs[n]; is_input && s.password do return .Password
+	case .Menu_Item:
+		if .Radio_Item in d.flags do return .Radio_Menu_Item
+		if .Check_Item in d.flags do return .Check_Menu_Item
 	}
 	return a11y_role(d.access.role)
 }
@@ -1133,6 +1138,8 @@ a11y_flags :: proc(t: ^Tree, n: Node, d: ^Node_Data) -> (out: A11y_Flags) {
 	#partial switch d.access.role {
 	case .Checkbox, .Radio, .Switch, .Toggle_Button:
 		out += {.Checkable}
+	case .Menu_Item:
+		if d.flags & {.Check_Item, .Radio_Item} != {} do out += {.Checkable}
 	case .Text_Input, .Search_Box:
 		out += {.Selectable_Text}
 		if .Readonly not_in s do out += {.Editable}

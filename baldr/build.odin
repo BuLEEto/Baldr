@@ -129,6 +129,8 @@ Ui :: struct($Msg: typeid) {
 	editor_contexts: map[Node]Handler(Msg, Editor_Context), // editors (by area): a right-click or the Menu key in the text
 	complete_asks:   map[Node]Handler(Msg, Complete_Ask),   // editors (by area) whose completion answers later (editor_complete.odin)
 	word_clicks:     map[Node]Handler(Msg, Pos),            // code editors (by area): Ctrl+click on a word
+	menu_leads:      [dynamic]Menu_Lead,                    // this build's menu rows, lined up at its end (menu_leads_settle)
+	menu_slot:       map[Node]bool,                         // menus (by popup) whose rows keep a leading slot
 	paste_others:    map[Node]Handler(Msg, Paste_Other),    // editors and fields: a paste that brought no text, but a picture or files
 	md_links:        map[Node]Handler(Msg, string),         // markdown views: a link the person pressed, by its target
 	md_images:       map[Node]Handler(Msg, string),         // …and a picture in a reply, by its src: the app opens it its own way
@@ -261,6 +263,8 @@ ui_init :: proc(ui: ^Ui($Msg), allocator := context.allocator) {
 	ui.editor_contexts = make(map[Node]Handler(Msg, Editor_Context), allocator)
 	ui.complete_asks = make(map[Node]Handler(Msg, Complete_Ask), allocator)
 	ui.word_clicks = make(map[Node]Handler(Msg, Pos), allocator)
+	ui.menu_leads = make([dynamic]Menu_Lead, allocator)
+	ui.menu_slot = make(map[Node]bool, allocator)
 	ui.paste_others = make(map[Node]Handler(Msg, Paste_Other), allocator)
 	ui.md_links = make(map[Node]Handler(Msg, string), allocator)
 	ui.md_images = make(map[Node]Handler(Msg, string), allocator)
@@ -356,6 +360,8 @@ ui_destroy :: proc(ui: ^Ui($Msg)) {
 	delete(ui.editor_contexts)
 	delete(ui.complete_asks)
 	delete(ui.word_clicks)
+	delete(ui.menu_leads)
+	delete(ui.menu_slot)
 	delete(ui.paste_others)
 	delete(ui.md_links)
 	delete(ui.md_images)
@@ -439,6 +445,7 @@ end_view :: proc(ui: ^Ui($Msg), loc := #caller_location) -> Error {
 	drag_preview_reapply(ui) // the rebuild restored the app's order; relink the reorder preview
 	drag_ghost_build(ui, loc)
 	sweep_overlay(ui)
+	menu_leads_settle(ui)
 	focus_sweep(ui) // the `focus` command's ask, if the widget it names is built
 	// The fence is reset at the end of every view: a widget that returned
 	// between `view_inner_begin` and its `end` would otherwise leave it
@@ -825,6 +832,7 @@ forget_subtree :: proc(ui: ^Ui($Msg), n: Node) {
 	delete_key(&ui.editor_contexts, n)
 	delete_key(&ui.complete_asks, n)
 	delete_key(&ui.word_clicks, n)
+	delete_key(&ui.menu_slot, n)
 	delete_key(&ui.paste_others, n)
 	delete_key(&ui.md_links, n)
 	delete_key(&ui.md_images, n)

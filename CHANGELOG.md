@@ -15,6 +15,9 @@ version may break the API; every break is listed here.
   answers are dropped; the last one narrows as you type.
 - `on_word_click` on `code_editor`: Ctrl+click (Cmd+click on macOS) on a
   word, with the word underlined while the key is held.
+- `editor_bar` opens and closes a code editor's Find, Replace and Go to
+  Line bars from the app, as their keys do; `editor_bar_shown` reads which
+  is open.
 - The caret follows the desktop's blink settings (GNOME, Windows):
   `A11y_Prefs` gains `steady_caret`, `caret_blink_ms` and
   `caret_blink_timeout_ms`.
@@ -26,6 +29,13 @@ version may break the API; every break is listed here.
 - A file dialog's `Ev.tag` is the command's `tag` (0 by default), where it
   was an internal token.
 - On macOS a rich editor's link follows on Cmd+click, as well as Ctrl+click.
+- A menu's labels line up: once any row has a tick, dot or icon, every row
+  keeps one leading slot. A toggle shows its state there rather than its
+  icon.
+- An unticked check item shows an empty box, and screen readers hear check
+  and radio items as check and radio menu items, ticked or not.
+- Asking for a code editor's open bar again (Ctrl+F while Find is open)
+  puts the keyboard back in its field; reopened, the old query is selected.
 - Chart bars are placed by their x, not their index: a missing category
   leaves a gap, series of different lengths line up, and labels sit under
   their bars.
@@ -37,6 +47,8 @@ version may break the API; every break is listed here.
   nodes changed, and leaked its ports on every build.
 - With several bar series, the pointer reads the bar it is over, not always
   the first; the readout names the series.
+- With a code editor's find bar open, typing in the code moved the
+  keyboard to the find field and the caret to a match.
 - A click on a completion row puts it in, as Enter does; it closed the list
   and took the keyboard out of the editor.
 - A closing modal dialog no longer takes focus back from where the app put

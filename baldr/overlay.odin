@@ -858,11 +858,12 @@ context_menu :: proc(ui: ^Ui($Msg), open: bool, dismiss: Msg, min_width: f32 = 1
 
 // menu_item is one row of a menu: label left, optional shortcut hint right.
 // Activating it (click, Enter, Space) queues `on_click` and closes the menu.
-// `checked` (a bool, or nil for a plain item) shows a check mark — or a
-// dot when `radio` — in a leading slot and sets the Checked state; give the
-// plain items of such a menu `checked = false` so their labels line up.
-// `icon` or `theme_icon` (an icon theme name: a jump-list action's Icon=, a
-// dbusmenu icon-name) goes before the label.
+// `checked` (a bool, or nil for a plain item) makes it a toggle: a box,
+// ticked or empty, in a leading slot, or a dot when `radio` (an unpicked
+// radio item shows nothing). `icon` or `theme_icon` (an icon theme name: a
+// jump-list action's Icon=, a dbusmenu icon-name) takes the slot on an item
+// that is not a toggle. Once any row of a menu fills its slot, every label
+// starts after one.
 menu_item :: proc(ui: ^Ui($Msg), label: string, on_click: Msg, shortcut: string = "", disabled := false,
 	icon: Icon = .None, theme_icon := "", checked: Maybe(bool) = nil, radio := false, tag: u64 = 0, key: u64 = 0, loc := #caller_location) -> Node {
 	n, created := reconcile_child(ui, .Box, key, loc)
@@ -881,30 +882,41 @@ menu_item :: proc(ui: ^Ui($Msg), label: string, on_click: Msg, shortcut: string 
 	set_disabled(t, n, disabled)
 	is_checked, checkable := checked.?
 	if checkable && is_checked { d.access.states += {.Checked} } else { d.access.states -= {.Checked} }
+	d.flags -= {.Check_Item, .Radio_Item}
+	if checkable do d.flags += Node_Flags{.Radio_Item} if radio else Node_Flags{.Check_Item}
 	st := d.style
 	st.radius = lk.item_radius
 	set_style(t, n, st)
 	ui.clicks[n] = on_click
-	if owner := overlay_child_of(t, ui.scopes[len(ui.scopes) - 1].node); owner != NODE_NONE do ui.closes[n] = owner
+	parent := ui.scopes[len(ui.scopes) - 1].node
+	owner := overlay_child_of(t, parent)
+	if owner != NODE_NONE do ui.closes[n] = owner
 	open_scope(ui, n, loc)
-	lead := row(ui, gap = lk.icon_gap, align = .Center, loc = loc)
+	menu_lead_open(ui, lk, owner if owner != NODE_NONE else parent, checkable || icon != .None || theme_icon != "", loc)
 	if checkable {
 		slot := row(ui, width = lk.icon_size, align = .Center, justify = .Center, key = u64(Control_Part.Check), loc = loc)
-		if is_checked && radio {
-			box(ui, width = 7, height = 7, bg = lk.ink, radius = 3.5, loc = loc)
-		} else if is_checked {
-			baldr_icon(ui, .Check, lk.icon_size, lk.ink, loc)
+		if radio {
+			if is_checked do box(ui, width = 7, height = 7, bg = lk.ink, radius = 3.5, loc = loc)
+		} else {
+			// told apart by shape, not by a fainter tick: an empty box is a toggle that is off
+			ck := check_look(th)
+			edge := lk.icon_size - 2
+			row(ui, width = edge, height = edge, align = .Center, justify = .Center, radius = ck.indicator_radius,
+				border = lk.ink, border_width = max(ck.border_width, 1), loc = loc)
+			if is_checked do baldr_icon(ui, .Check, edge - 2, lk.ink, loc)
+			close_scope(ui)
 		}
 		set_role(t, slot, .None)
 		close_scope(ui)
+	} else if theme_icon != "" {
+		baldr_theme_icon(ui, theme_icon, lk.icon_size, lk.ink, loc, key = u64(Control_Part.Theme_Icon), fallback = icon) // the icon stands in when no theme provides it
+	} else if icon != .None {
+		baldr_icon(ui, icon, lk.icon_size, lk.ink, loc, key = u64(Control_Part.Icon))
 	}
-	if icon != .None && theme_icon == "" do baldr_icon(ui, icon, lk.icon_size, lk.ink, loc, key = u64(Control_Part.Icon))
-	if theme_icon != "" do baldr_theme_icon(ui, theme_icon, lk.icon_size, lk.ink, loc, key = u64(Control_Part.Theme_Icon), fallback = icon) // the icon stands in when no theme provides it
 	l := text(ui, label, role = lk.text.role, size = lk.text.size, color = lk.ink, weight = lk.text.weight,
 		family = look_family(t, lk.text.family), key = u64(Control_Part.Label), loc = loc)
 	set_role(t, l, .None)
 	close_scope(ui)
-	_ = lead
 	if shortcut != "" {
 		s := text(ui, shortcut, role = lk.shortcut_text.role, size = lk.shortcut_text.size, color = lk.shortcut_ink,
 			weight = lk.shortcut_text.weight, family = look_family(t, lk.shortcut_text.family), loc = loc)
@@ -912,6 +924,51 @@ menu_item :: proc(ui: ^Ui($Msg), label: string, on_click: Msg, shortcut: string 
 	}
 	close_scope(ui)
 	return n
+}
+
+// Menu_Lead is a menu row's leading part as built: which menu it is in,
+// whether its slot shows a box, dot or icon, and the inset that lines a
+// bare label up with the others.
+@(private)
+Menu_Lead :: struct {
+	menu, lead: Node,
+	shows:      bool,
+	inset:      f32,
+}
+
+// menu_lead_open opens a row's leading part, the slot and the label. A bare
+// row takes the inset its menu had last build, so a steady menu sets
+// nothing; menu_leads_settle corrects one that changed.
+@(private)
+menu_lead_open :: proc(ui: ^Ui($Msg), lk: Menu_Look, menu: Node, shows: bool, loc: runtime.Source_Code_Location) {
+	t := &ui.tree
+	inset := lk.icon_size + lk.icon_gap
+	lead, _ := reconcile_child(ui, .Box, 0, loc)
+	pad := inset if !shows && ui.menu_slot[menu] else 0
+	set_layout(t, lead, Layout_Props{axis = .Row, align = .Center, gap = lk.icon_gap, padding = {0, 0, 0, pad}})
+	open_scope(ui, lead, loc)
+	append(&ui.menu_leads, Menu_Lead{menu = menu, lead = lead, shows = shows, inset = inset})
+}
+
+// menu_leads_settle lines up each menu built this build: when any of its
+// rows fills the slot, every bare row is inset by one.
+@(private)
+menu_leads_settle :: proc(ui: ^Ui($Msg)) {
+	if len(ui.menu_leads) == 0 do return
+	t := &ui.tree
+	want := make(map[Node]bool, context.temp_allocator)
+	for l in ui.menu_leads do want[l.menu] = want[l.menu] || l.shows
+	for l in ui.menu_leads {
+		w := want[l.menu]
+		if l.shows || w == ui.menu_slot[l.menu] do continue
+		if d := node_get(t, l.lead); d != nil {
+			lay := d.layout
+			lay.padding[3] = l.inset if w else 0
+			set_layout(t, l.lead, lay)
+		}
+	}
+	for m, w in want do ui.menu_slot[m] = w
+	clear(&ui.menu_leads)
 }
 
 SUBMENU_DELAY_MS :: 180.0
@@ -952,15 +1009,16 @@ submenu :: proc(ui: ^Ui($Msg), label: string, icon: Icon = .None, theme_icon := 
 	st.bg = lk.open_fill if open else Color{}
 	set_style(t, n, st)
 	ui.submenus[n] = NODE_NONE
+	parent := ui.scopes[len(ui.scopes) - 1].node
+	owner := overlay_child_of(t, parent)
 	open_scope(ui, n, loc)
-	lead := row(ui, gap = lk.icon_gap, align = .Center, loc = loc)
+	menu_lead_open(ui, lk, owner if owner != NODE_NONE else parent, icon != .None || theme_icon != "", loc)
 	if icon != .None && theme_icon == "" do baldr_icon(ui, icon, lk.icon_size, lk.ink, loc, key = u64(Control_Part.Icon))
 	if theme_icon != "" do baldr_theme_icon(ui, theme_icon, lk.icon_size, lk.ink, loc, key = u64(Control_Part.Theme_Icon), fallback = icon) // the icon stands in when no theme provides it
 	l := text(ui, label, role = lk.text.role, size = lk.text.size, color = lk.ink, weight = lk.text.weight,
 		family = look_family(t, lk.text.family), key = u64(Control_Part.Label), loc = loc)
 	set_role(t, l, .None)
 	close_scope(ui)
-	_ = lead
 	baldr_icon(ui, .Chevron_Right, lk.icon_size, lk.shortcut_ink, loc) // as legible as a shortcut hint
 	close_scope(ui)
 	if !open do return false

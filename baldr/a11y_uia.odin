@@ -1297,7 +1297,7 @@ uia_control_type :: proc(r: A11y_Role) -> i32 {
 	case .Tab:           return UIA_CT_TAB_ITEM
 	case .Menu_Bar:      return UIA_CT_MENU_BAR
 	case .Menu:          return UIA_CT_MENU
-	case .Menu_Item:     return UIA_CT_MENU_ITEM
+	case .Menu_Item, .Check_Menu_Item, .Radio_Menu_Item: return UIA_CT_MENU_ITEM // its Toggle pattern says it ticks
 	case .Dialog:        return UIA_CT_WINDOW
 	case .Alert:         return UIA_CT_GROUP
 	case .Status_Bar:    return UIA_CT_STATUS_BAR

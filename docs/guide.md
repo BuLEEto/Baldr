@@ -963,7 +963,7 @@ in an app that ships them: [`THIRD_PARTY.md`](../THIRD_PARTY.md) lists them.
 ## Testing without a window
 
 Layout, reconcile, paint and accessibility all run headless. No GPU, no
-compositor, no window — which is why the suite is 1,614 tests and runs in
+compositor, no window — which is why the suite is 1,623 tests and runs in
 under a second.
 
 ```odin

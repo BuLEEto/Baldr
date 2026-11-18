@@ -466,7 +466,7 @@ axm_title :: proc "c" (self: ObjC.id, cmd: ObjC.SEL) -> ^NS.String {
 ax_names_itself :: proc(r: A11y_Role) -> bool {
 	#partial switch r {
 	case .Button, .Toggle_Button, .Check_Box, .Radio_Button, .Link,
-	     .Menu_Item, .Tab, .List_Item, .Tree_Item, .Row, .Cell, .Column_Header:
+	     .Menu_Item, .Check_Menu_Item, .Radio_Menu_Item, .Tab, .List_Item, .Tree_Item, .Row, .Cell, .Column_Header:
 		return true
 	}
 	return false
@@ -881,7 +881,7 @@ ax_role :: proc(r: A11y_Role) -> ^NS.String {
 	case .Tab:           return NSAccessibilityRadioButtonRole // which is what AppKit's own tabs are
 	case .Menu_Bar:      return NSAccessibilityMenuBarRole
 	case .Menu:          return NSAccessibilityMenuRole
-	case .Menu_Item:     return NSAccessibilityMenuItemRole
+	case .Menu_Item, .Check_Menu_Item, .Radio_Menu_Item: return NSAccessibilityMenuItemRole
 	case .Dialog:        return NSAccessibilitySheetRole
 	case .Alert:         return NSAccessibilityGroupRole
 	case .Status_Bar:    return NSAccessibilityGroupRole

@@ -55,6 +55,8 @@ Node_Flag :: enum u8 {
 	Focusable,
 	Keys_Only_Focus,   // Tab reaches it, a press does not: a tool button, a toolbar, a transport (button_options focus_on_click = false)
 	Pointer_Only_Focus, // the mirror: a press focuses it, Tab passes it by — a read-only paragraph a chat has hundreds of (Qt's ClickFocus, HTML's tabindex=-1)
+	Check_Item,        // a menu item that ticks: readers hear a check menu item, ticked or not
+	Radio_Item,        // …one of a set, picked or not
 	// interaction
 	Hovered,
 	Pressed,
