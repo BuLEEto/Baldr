@@ -274,6 +274,22 @@ settings_reads_the_cursor_theme_and_size :: proc(t: ^testing.T) {
 	testing.expect_value(t, a.cursor_size, 32)
 }
 
+// The text caret's blink as GNOME sets it (Accessibility > Typing): off,
+// the whole cycle's length and when it stops. Each stays unsaid until read.
+@(test)
+settings_reads_the_carets_blink :: proc(t: ^testing.T) {
+	ta := context.temp_allocator
+	a := Appearance{}
+	testing.expect(t, !a.steady_caret && a.caret_cycle_ms == 0 && a.caret_timeout_s == 0)
+	testing.expect(t, settings_apply(&a, "org.gnome.desktop.interface", "cursor-blink", dbus.variant(false, ta)), "a change is reported")
+	settings_apply(&a, "org.gnome.desktop.interface", "cursor-blink-time", dbus.variant(i32(1000), ta))
+	settings_apply(&a, "org.gnome.desktop.interface", "cursor-blink-timeout", dbus.variant(i32(5), ta))
+	testing.expect(t, a.steady_caret && a.caret_cycle_ms == 1000 && a.caret_timeout_s == 5)
+	settings_apply(&a, "org.gnome.desktop.interface", "cursor-blink", dbus.variant(true, ta))
+	settings_apply(&a, "org.gnome.desktop.interface", "cursor-blink-time", dbus.variant(i32(0), ta)) // nonsense is not taken
+	testing.expect(t, !a.steady_caret && a.caret_cycle_ms == 1000)
+}
+
 // The UI font's size, in points, from every shape a description comes in;
 // 0 when it states none. Pango's absolute "px" is 1/96 inch, so 14 px is
 // 10.5 pt, and the family under it is "Sans", not "Sans 14px".

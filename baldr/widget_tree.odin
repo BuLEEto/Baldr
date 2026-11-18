@@ -78,9 +78,13 @@ tree_view :: proc(ui: ^Ui($Msg), label: string = "", flex: f32 = 0, height: f32 
 
 // tree_item adds one row to the open tree (or branch). Returns whether its
 // children scope is open — close it with end only then. Items without a
-// `key` are identified by their label.
+// `key` are identified by their label. `muted` draws its label and icon in
+// the muted ink and changes nothing else: a file the project leaves out,
+// there but not part of it. `disabled` dims it and stops it working too. A
+// selected row keeps the selection's ink, which is the one made to read on
+// the selection's fill.
 tree_item :: proc(ui: ^Ui($Msg), label: string, on_click: Msg, expanded := false, on_change: Handler(Msg, bool) = nil,
-	selected := false, icon: Icon = .None, on_activate: Handler(Msg, int) = nil, disabled := false,
+	selected := false, icon: Icon = .None, on_activate: Handler(Msg, int) = nil, disabled := false, muted := false,
 	drag: string = "", on_drop: Handler(Msg, Drop) = nil, accepts: string = "", on_rest: Handler(Msg, Drag_Rest) = nil,
 	on_submit: Handler(Msg, string) = nil, on_cancel: Maybe(Msg) = nil,
 	on_context: Handler(Msg, int) = nil, on_middle_click: Maybe(Msg) = nil, drop_positions: Drop_Positions = {},
@@ -123,8 +127,8 @@ tree_item :: proc(ui: ^Ui($Msg), label: string, on_click: Msg, expanded := false
 	st.radius = lk.radius
 	st.bg = lk.selected_fill if selected else Color{}
 	set_style(t, row, st)
-	fg := lk.selected_ink if selected else lk.ink
-	ic := lk.branch_icon_ink if expandable && !selected else fg // a disabled row's label and icon dim in paint (disabled_within)
+	fg := lk.selected_ink if selected else lk.muted_ink if muted else lk.ink
+	ic := lk.branch_icon_ink if expandable && !selected && !muted else fg // a disabled row's label and icon dim in paint (disabled_within)
 	ui.clicks[row] = on_click
 	if handler_live(on_context) { ui.on_context[row] = on_context } else { delete_key(&ui.on_context, row) } // right-click / Menu key: the item's tag
 	if m, has := on_middle_click.?; has { ui.middle_clicks[row] = m } else { delete_key(&ui.middle_clicks, row) }

@@ -174,7 +174,7 @@ Cmd :: struct($Msg: typeid) {
 	work:     proc(^Job(Msg)),            // Job: what runs on the thread
 	data:     rawptr,                     // …with this
 	on_done:  Handler(Msg, Job_Done),     // …and what its end becomes
-	tag:      u64,                        // Job / Read_File / Write_File: echoed in the outcome; Cancel: which jobs
+	tag:      u64,                        // Job / Read_File / Write_File / Open_Files / Save_File: echoed in the outcome; Cancel: which jobs
 	list:     []Cmd(Msg),                 // Batch
 	ms:       i64,                        // Delay
 	msg:      Msg,                        // Delay: what is sent
@@ -256,15 +256,16 @@ Drag_Icon :: platform.Drag_Icon
 quit :: proc($Msg: typeid) -> Cmd(Msg) { return {kind = .Quit} }
 
 // open_files asks for the desktop's open dialog; the handler receives
-// Files with the chosen path(s), or ok = false when cancelled.
+// Files with the chosen path(s), or ok = false when cancelled. `tag` comes
+// back as the `Ev`'s tag: which window or document asked, when several can.
 //
 //	case Pick: return baldr.open_files(Msg, proc(e: baldr.Ev(baldr.Files)) -> Msg { return Picked{e.value} },
 //		title = "Choose an image", filters = {{name = "Images", patterns = {"*.png", "*.jpg"}}})
 // The strings and filters are copied for the rest of the loop iteration:
 // literals written inside update (which live on its stack) are fine.
 open_files :: proc($Msg: typeid, on_done: Handler(Msg, Files), title: string = "", multiple := false, directory := false,
-	filters: []File_Filter = {}, folder: string = "", accept_label: string = "") -> Cmd(Msg) {
-	return {kind = .Open_Files, on_files = on_done,
+	filters: []File_Filter = {}, folder: string = "", accept_label: string = "", tag: u64 = 0) -> Cmd(Msg) {
+	return {kind = .Open_Files, on_files = on_done, tag = tag,
 		dialog = {title = temp_clone(title), multiple = multiple, directory = directory, filters = filters_clone(filters), current_folder = temp_clone(folder), accept_label = temp_clone(accept_label)}}
 }
 
@@ -272,10 +273,11 @@ open_files :: proc($Msg: typeid, on_done: Handler(Msg, Files), title: string = "
 // path to write, or ok = false and `why`. Pass `folder` where you can; on
 // Linux a dialog given none starts in the home folder, because the desktop's
 // dialog service would otherwise start in whatever folder it was itself
-// started from — which can be `/`.
+// started from — which can be `/`. `tag` comes back as the `Ev`'s tag, as
+// `open_files`' does.
 save_file :: proc($Msg: typeid, on_done: Handler(Msg, Files), title: string = "", name: string = "",
-	filters: []File_Filter = {}, folder: string = "", accept_label: string = "") -> Cmd(Msg) {
-	return {kind = .Save_File, on_files = on_done,
+	filters: []File_Filter = {}, folder: string = "", accept_label: string = "", tag: u64 = 0) -> Cmd(Msg) {
+	return {kind = .Save_File, on_files = on_done, tag = tag,
 		dialog = {save = true, title = temp_clone(title), current_name = temp_clone(name), filters = filters_clone(filters), current_folder = temp_clone(folder), accept_label = temp_clone(accept_label)}}
 }
 
@@ -344,7 +346,8 @@ filters_clone :: proc(filters: []File_Filter) -> []File_Filter {
 
 // files_deliver turns a dialog outcome into the app's message through the
 // command's handler (a plain message, or a proc given Ev{value, tag =
-// token}); nil delivers nothing.
+// token}); nil delivers nothing. The run loop passes the command's `tag`
+// as `token`.
 files_deliver :: proc(h: Handler($Msg, Files), files: Files, token: u64, out: ^[dynamic]Msg) -> bool {
 	switch v in h {
 	case Msg:
@@ -355,6 +358,24 @@ files_deliver :: proc(h: Handler($Msg, Files), files: Files, token: u64, out: ^[
 		return true
 	}
 	return false
+}
+
+// files_done delivers a file dialog's outcome (Ev_Files) to the app, with
+// the tag its command carried.
+@(private)
+files_done :: proc(rt: ^Runtime($State, $Msg), e: platform.Ev_Files) {
+	p, waiting := rt.pending_files[e.token]
+	if !waiting do return
+	delete_key(&rt.pending_files, e.token)
+	files_deliver(p.on_done, Files{paths = e.paths, ok = e.ok, why = e.why, uris = e.uris}, p.tag, &rt.msgs)
+}
+
+// Pending_Files is a file dialog on screen: what its outcome becomes, and
+// the tag its command carried.
+@(private)
+Pending_Files :: struct($Msg: typeid) {
+	on_done: Handler(Msg, Files),
+	tag:     u64,
 }
 
 // Frame_Ctx is the non-generic slice of the run loop so a platform modal
@@ -1359,6 +1380,9 @@ a11y_prefs_of :: proc(sys: platform.Ev_Theme) -> A11y_Prefs {
 		reduce_motion       = sys.reduce_motion || os.get_env("BALDR_MOTION", context.temp_allocator) == "0",
 		reduce_transparency = sys.reduce_transparency || os.get_env("BALDR_GLASS", context.temp_allocator) == "0",
 		text_scale          = (sys.text_scale if sys.text_scale > 0 else 1) * desktop_font_scale(sys.font_size),
+		steady_caret           = sys.steady_caret,
+		caret_blink_ms         = sys.caret_blink_ms,
+		caret_blink_timeout_ms = sys.caret_blink_timeout_ms,
 	}
 	if sc, ok := strconv.parse_f32(os.get_env("BALDR_TEXT_SCALE", context.temp_allocator)); ok && sc > 0 do out.text_scale = sc
 	return out
@@ -1483,7 +1507,7 @@ Runtime :: struct($State, $Msg: typeid) {
 	tray_wanted:   [dynamic]Tray_Desc(Msg),      // scratch for app.tray
 	tray_live:     map[u64]Tray_Live(Msg),       // what is in the tray now, by tag (tray.odin)
 	t0:            time.Tick,
-	pending_files: map[u64]Handler(Msg, Files), // file dialogs on screen, by token
+	pending_files: map[u64]Pending_Files(Msg), // file dialogs on screen, by token
 	pending_urls:  map[u64]Url_Ask(Msg),        // links handed to the desktop, waiting for its answer (url.odin)
 	pending_paths: map[u64]Path_Ask(Msg),       // …and local files handed to it (path_open.odin); one token counter serves both
 	// The strings those asks answered with, freed once the update that was
@@ -1518,9 +1542,9 @@ run_cmd :: proc(rt: ^Runtime($State, $Msg), cmd: Cmd(Msg)) -> bool {
 		d.token = rt.next_token
 		shown := rt.backend.file_dialog != nil && rt.backend.file_dialog(rt.backend, d)
 		if shown {
-			rt.pending_files[d.token] = cmd.on_files
+			rt.pending_files[d.token] = {cmd.on_files, cmd.tag}
 		} else {
-			files_deliver(cmd.on_files, Files{ok = false, why = .Not_Shown}, d.token, &rt.msgs) // no dialog on this desktop: say so at once
+			files_deliver(cmd.on_files, Files{ok = false, why = .Not_Shown}, cmd.tag, &rt.msgs) // no dialog on this desktop: say so at once
 		}
 	case .Job:
 		if j := job_start(&rt.mailbox, cmd.work, cmd.data, cmd.on_done, cmd.tag); j != nil {
@@ -2452,7 +2476,7 @@ run :: proc(app: App($State, $Msg)) -> Error {
 	rt.ctxs = make([dynamic]^Surface_Ctx(Msg))
 	rt.frames = make([dynamic]^Frame_Ctx)
 	rt.wanted = make([dynamic]Surface_Desc(Msg))
-	rt.pending_files = make(map[u64]Handler(Msg, Files))
+	rt.pending_files = make(map[u64]Pending_Files(Msg))
 	rt.pending_paths = make(map[u64]Path_Ask(Msg))
 	rt.spent_asks = make([dynamic]string)
 	rt.notify_watches = make([dynamic]Notify_Watch(Msg))
@@ -2600,11 +2624,7 @@ run :: proc(app: App($State, $Msg)) -> Error {
 		for c in rt.ctxs {
 			timers_before := len(c.ui.timers)
 			if ui_tick(&c.ui, now) do c.needs_frame = true
-			if len(c.ui.timers) < timers_before {
-				// a timer fired and dirtied its node
-				text_input_wake(&c.ui.tree) // text_input hook: caret blink phase
-				c.needs_frame = true
-			}
+			if len(c.ui.timers) < timers_before do c.needs_frame = true // a timer fired and dirtied its node
 		}
 		for ev in events {
 			switch e in ev {
@@ -3009,10 +3029,7 @@ run :: proc(app: App($State, $Msg)) -> Error {
 					if debug_events do fmt.eprintfln("baldr/events: keyboard %s surface %v", "entered" if e.focused else "left", e.surface)
 				}
 			case platform.Ev_Files:
-				if h, has := rt.pending_files[e.token]; has {
-					delete_key(&rt.pending_files, e.token)
-					files_deliver(h, Files{paths = e.paths, ok = e.ok, why = e.why, uris = e.uris}, e.token, &rt.msgs)
-				}
+				files_done(&rt, e)
 			case platform.Ev_Watch:
 				sched_watch_event(&rt.sched, e.token, e.name, e.kind, &rt.msgs)
 			case platform.Ev_Quit:

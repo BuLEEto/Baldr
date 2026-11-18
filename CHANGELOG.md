@@ -3,6 +3,31 @@
 Baldr follows [semantic versioning](https://semver.org). Until 1.0, a minor
 version may break the API; every break is listed here.
 
+## Unreleased
+
+### Added
+
+- `italic` on `text`, and on a button's label through `button_options`.
+- `muted` on `tree_item`: the label and icon in the muted ink, and the row
+  works as any other.
+- `tag` on `open_files`, `save_file` and `split`, handed back as the `Ev`'s
+  tag, so an app with several windows knows which one a dialog's answer or a
+  divider's drag is for.
+- The text caret follows the desktop's blink settings: whether it blinks,
+  how fast, and when it stops (GNOME through the settings portal; Windows'
+  caret blink rate and timeout). `A11y_Prefs` gains `steady_caret`,
+  `caret_blink_ms` and `caret_blink_timeout_ms`.
+
+### Changed
+
+- A caret stops blinking, shown, 10 seconds after the last key, click or
+  move (the desktop's timeout where it sets one), so an idle window with the
+  keyboard in a field or editor wakes for nothing. Fields and editors keep
+  the caret steady under reduced motion, as the terminal already did.
+- A caret's blink presents only the caret, not the whole field or editor.
+- A file dialog's `Ev.tag` is the command's `tag` (0 when none is given),
+  where it was an internal token.
+
 ## 0.1.0 — 2026-11-17
 
 The first public release.

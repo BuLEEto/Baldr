@@ -597,11 +597,16 @@ theme_from_seed :: proc(accent: Color, mode: Theme_Mode, contrast: Theme_Contras
 }
 
 // A11y_Prefs are the desktop's accessibility preferences, which every theme
-// follows whoever built it.
+// follows whoever built it. The caret's blink is one: zero values are the
+// toolkit's defaults (CARET_BLINK_MS, CARET_BLINK_TIMEOUT_MS), and reduced
+// motion keeps the caret still as `steady_caret` does.
 A11y_Prefs :: struct {
 	reduce_motion:       bool, // transitions off
 	reduce_transparency: bool, // glass becomes opaque surfaces
 	text_scale:          f32,  // the desktop's text size: 1 normal, 1.5 = "large text" (0 is read as 1)
+	steady_caret:           bool, // the text caret is shown without blinking
+	caret_blink_ms:         f32,  // the caret's half-period: shown this long, hidden this long (0: the default)
+	caret_blink_timeout_ms: f32,  // how long it blinks after the last key, click or move, then stays shown (0: the default)
 }
 
 // TEXT_SCALE_MIN / TEXT_SCALE_MAX bound what a desktop can ask for, so a
@@ -713,7 +718,7 @@ follow_system_theme :: proc(t: ^Tree) {
 }
 
 // set_a11y_prefs swaps the accessibility preferences this tree runs with —
-// text size, reduce motion, reduce transparency — for a desktop that owns
+// text size, reduce motion, reduce transparency, the caret's blink — for a desktop that owns
 // them and would rather say than be asked. They are folded into the theme
 // the same way the desktop's are, they reach a size the app set itself as
 // well as the theme's roles, and once set the desktop's preferences leave
@@ -854,6 +859,7 @@ tree_theme :: proc(t: ^Tree, th: Theme) {
 	for &d, i in t.nodes {
 		if i == 0 || .Alive not_in d.flags do continue
 		d.flags += {.Dirty_Paint}
+		d.flags -= {.Blink_Only}
 	}
 	for n, _ in t.layers {
 		if d := node_get(t, n); d != nil do d.flags += {.Layer_Dirty}

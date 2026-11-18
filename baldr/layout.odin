@@ -208,12 +208,12 @@ layout_node :: proc(t: ^Tree, n: Node, c: Constraints) -> [2]f32 {
 		// line, so its box and what it draws agree.
 		one_line := k.nowrap || (k.ellipsis != .None && k.max_lines == 0)
 		max_w := cc.max.x if is_bounded(cc.max.x) && !one_line else 0
-		measured := t.measure_text(t, k.str, k.size, max_w, k.weight, k.mono, k.family, k.tabular)
+		measured := text_kind_measure(t, k, k.str, max_w)
 		// A text given its whole width is set on one line. Text layout wraps at
 		// the width rounded down to a pixel, so a word given exactly the width
 		// it needs (63.996 px, wrapped at 63) would break in two.
-		if max_w > 0 && measured.y > t.measure_text(t, "x", k.size, 0, k.weight, k.mono, k.family, k.tabular).y * 1.5 {
-			if one := t.measure_text(t, k.str, k.size, 0, k.weight, k.mono, k.family, k.tabular); one.x <= max_w + 0.01 {
+		if max_w > 0 && measured.y > text_kind_measure(t, k, "x", 0).y * 1.5 {
+			if one := text_kind_measure(t, k, k.str, 0); one.x <= max_w + 0.01 {
 				measured, max_w = one, 0
 			}
 		}
@@ -224,7 +224,7 @@ layout_node :: proc(t: ^Tree, n: Node, c: Constraints) -> [2]f32 {
 		// rather than painting past its box.
 		fit := tk
 		if is_bounded(cc.max.y) && !one_line && measured.y > cc.max.y + 0.01 {
-			lh := t.measure_text(t, "x", k.size, 0, k.weight, k.mono, k.family, k.tabular).y
+			lh := text_kind_measure(t, k, "x", 0).y
 			lines := max(int((cc.max.y + 0.01) / max(lh, 1)), 1)
 			if fit.max_lines <= 0 || lines < fit.max_lines do fit.max_lines = lines
 			if fit.ellipsis == .None do fit.ellipsis = .End
@@ -330,16 +330,26 @@ box_min_content_width :: proc(t: ^Tree, d: ^Node_Data) -> f32 {
 	return widest + pad
 }
 
+// text_kind_measure measures `s` as text node `k` draws it. The hook has no
+// say in italic, so an italic text is measured by the engine directly when
+// the hook is the engine's own; the italic face is narrower or wider than
+// the upright one, and a box measured upright would cut or crowd it.
+@(private)
+text_kind_measure :: proc(t: ^Tree, k: Text_Kind, s: string, max_w: f32) -> [2]f32 {
+	if k.italic && t.measure_text == text_measure do return text_measure_as(t, s, k.size, max_w, k.weight, k.mono, k.family, k.tabular, italic = true)
+	return t.measure_text(t, s, k.size, max_w, k.weight, k.mono, k.family, k.tabular)
+}
+
 // text_min_width: what a text needs so that no word is broken apart.
 @(private)
 text_min_width :: proc(t: ^Tree, k: Text_Kind) -> f32 {
-	if k.ellipsis != .None do return t.measure_text(t, "…", k.size, 0, k.weight, k.mono, k.family, k.tabular).x
-	if k.nowrap do return t.measure_text(t, k.str, k.size, 0, k.weight, k.mono, k.family, k.tabular).x
+	if k.ellipsis != .None do return text_kind_measure(t, k, "…", 0).x
+	if k.nowrap do return text_kind_measure(t, k, k.str, 0).x
 	longest: f32
 	rest := k.str
 	for word in strings.split_multi_iterate(&rest, {" ", "\n", "\t", "\r"}) {
 		if word == "" do continue
-		longest = max(longest, t.measure_text(t, word, k.size, 0, k.weight, k.mono, k.family, k.tabular).x)
+		longest = max(longest, text_kind_measure(t, k, word, 0).x)
 	}
 	return longest
 }
@@ -372,13 +382,13 @@ apply_size_props :: proc "contextless" (c: Constraints, l: Layout_Props) -> Cons
 @(private)
 text_fit :: proc(t: ^Tree, tk: ^Text_Kind, avail: f32, full: [2]f32) -> [2]f32 {
 	wrap_w := avail if tk.max_lines > 0 else 0
-	lh := t.measure_text(t, "x", tk.size, 0, tk.weight, tk.mono, tk.family, tk.tabular).y
+	lh := text_kind_measure(t, tk^, "x", 0).y
 	fits :: proc(m: [2]f32, avail, lh: f32, max_lines: int) -> bool {
 		if max_lines > 0 do return int(math.round(m.y / lh)) <= max_lines && m.x <= avail + 0.01
 		return m.x <= avail + 0.01
 	}
 	measured := full
-	if tk.max_lines > 0 do measured = t.measure_text(t, tk.str, tk.size, wrap_w, tk.weight, tk.mono, tk.family, tk.tabular)
+	if tk.max_lines > 0 do measured = text_kind_measure(t, tk^, tk.str, wrap_w)
 	if fits(measured, avail, lh, tk.max_lines) {
 		if len(tk.display) > 0 {
 			delete(tk.display, t.allocator)
@@ -394,7 +404,7 @@ text_fit :: proc(t: ^Tree, tk: ^Text_Kind, avail: f32, full: [2]f32) -> [2]f32 {
 	for lo < hi {
 		mid := (lo + hi + 1) / 2
 		cand := ellipsis_candidate(tk.str, mid, tk.ellipsis, context.temp_allocator)
-		m := t.measure_text(t, cand, tk.size, wrap_w, tk.weight, tk.mono, tk.family, tk.tabular)
+		m := text_kind_measure(t, tk^, cand, wrap_w)
 		if fits(m, avail, lh, tk.max_lines) {
 			lo = mid
 			best, best_m = cand, m
@@ -404,7 +414,7 @@ text_fit :: proc(t: ^Tree, tk: ^Text_Kind, avail: f32, full: [2]f32) -> [2]f32 {
 	}
 	if best == "" {
 		best = "…"
-		best_m = t.measure_text(t, best, tk.size, wrap_w, tk.weight, tk.mono, tk.family, tk.tabular)
+		best_m = text_kind_measure(t, tk^, best, wrap_w)
 	}
 	if tk.display != best {
 		if len(tk.display) > 0 do delete(tk.display, t.allocator)

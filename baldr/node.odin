@@ -22,6 +22,7 @@ Node_Flag :: enum u8 {
 	// invalidation
 	Dirty_Layout,      // size/position may have changed; layout pass must visit
 	Dirty_Paint,       // appearance changed; owning layer must re-emit this node
+	Blink_Only,        // with Dirty_Paint: only its caret's blink changed, so the damage is where its paint says the caret is (caret_painted)
 	Dirty_Root,        // queued in Tree.dirty_roots
 	Layer_Dirty,       // set on a Layer node when any node it paints is Dirty_Paint
 	// structure
@@ -98,6 +99,7 @@ Text_Kind :: struct {
 	// its width: a stopwatch, a column of figures. Only the digits'
 	// advances change, not the face.
 	tabular: bool,
+	italic:  bool, // the face's italic: a provisional thing, a title, a term — `text(italic = true)`
 	// A secret shown on purpose (a revealed key, a recovery phrase): the
 	// tree's copy is overwritten before it is freed, and the accessibility
 	// bridge gets the node without its characters. `text(sensitive = true)`.
@@ -187,6 +189,8 @@ Tree :: struct {
 	damage_off:       bool, // laying out or painting inside a popup on a surface of its own, which presents whole: nothing there is damage
 	damage_elsewhere: bool, // …but something there changed since the last take_damage (surface_damage)
 	debug_damage:     bool, // BALDR_DEBUG_DAMAGE: print each node that damages its surface (damage_log)
+	blink_rect:       Rect, // where the node being painted drew its caret, or would have (caret_painted)…
+	blink_said:       bool, // …and whether its paint said so: a blink-only repaint damages that alone
 	debug_bounds:     bool, // BALDR_DEBUG_BOUNDS: report each node that draws outside its paint bounds (bounds_check)
 	bounds_faults:    [dynamic]Bounds_Fault, // what bounds_check found
 	debug_events:     bool, // BALDR_DEBUG_EVENTS: say why each overlay (a select's list, a menu, a popover) opens and closes
@@ -889,6 +893,7 @@ mark_paint_dirty :: proc(t: ^Tree, n: Node) {
 	d := node_get(t, n)
 	if d == nil do return
 	d.flags += {.Dirty_Paint}
+	d.flags -= {.Blink_Only} // something besides a blink: all of it is damage
 	cur := n
 	for cur != NODE_NONE {
 		ld := node_get(t, cur)
@@ -899,6 +904,18 @@ mark_paint_dirty :: proc(t: ^Tree, n: Node) {
 		}
 		cur = ld.parent
 	}
+}
+
+// mark_blink_dirty repaints `n` for its caret's blink alone: what it draws
+// is re-emitted, but only the caret is presented, unless something else
+// marked it this frame too.
+@(private)
+mark_blink_dirty :: proc(t: ^Tree, n: Node) {
+	d := node_get(t, n)
+	if d == nil do return
+	narrow := .Dirty_Paint not_in d.flags || .Blink_Only in d.flags
+	mark_paint_dirty(t, n)
+	if narrow do d.flags += {.Blink_Only}
 }
 
 // mark_host_layer_dirty rebuilds the list that decides whether `n` is drawn
@@ -1146,23 +1163,34 @@ Clipboard :: struct {
 }
 
 // Timer is a pending wake-up: repaint `node` (or just wake) at `at_ms`.
+// `blink`: every ask it holds is a caret's blink, so only the caret repaints.
 Timer :: struct {
 	at_ms: f64,
 	node:  Node,
+	blink: bool,
 }
 
 // tree_wake_at asks for a wake-up at `at_ms` on the tree clock and, when it
 // fires (in anim_tick), a repaint of `node`. Duplicate requests for the same
 // node keep the earlier time.
 tree_wake_at :: proc(t: ^Tree, at_ms: f64, node: Node = NODE_NONE) {
+	wake_at(t, at_ms, node, false)
+}
+
+// wake_at is tree_wake_at, saying whether the ask is a caret's blink. A
+// node has one timer, so one non-blink ask makes its next firing a whole
+// repaint.
+@(private)
+wake_at :: proc(t: ^Tree, at_ms: f64, node: Node, blink: bool) {
 	for &tm in t.timers {
 		if tm.node == node {
 			if at_ms < tm.at_ms do tm.at_ms = at_ms
+			tm.blink = tm.blink && blink
 			t.wake_at_ms = min(t.wake_at_ms, at_ms) if t.wake_at_ms > 0 else at_ms
 			return
 		}
 	}
-	append(&t.timers, Timer{at_ms = at_ms, node = node})
+	append(&t.timers, Timer{at_ms = at_ms, node = node, blink = blink})
 	if t.wake_at_ms == 0 || at_ms < t.wake_at_ms do t.wake_at_ms = at_ms
 }
 
@@ -1174,7 +1202,9 @@ fire_timers :: proc(t: ^Tree, now_ms: f64) -> (fired: bool) {
 	for i := 0; i < len(t.timers); {
 		tm := t.timers[i]
 		if tm.at_ms <= now_ms {
-			if tm.node != NODE_NONE do mark_paint_dirty(t, tm.node)
+			if tm.node != NODE_NONE {
+				if tm.blink { mark_blink_dirty(t, tm.node) } else { mark_paint_dirty(t, tm.node) }
+			}
 			unordered_remove(&t.timers, i)
 			fired = true
 			continue

@@ -13,6 +13,9 @@
 //                                  color-scheme s ("prefer-dark"…) fallback
 //                                  when org.freedesktop.appearance is absent
 //                                  icon-theme s → icon_theme
+//                                  cursor-blink b, cursor-blink-time i (ms,
+//                                  the whole cycle), cursor-blink-timeout i
+//                                  (s) → the text caret's blink
 //   org.gnome.desktop.a11y.interface high-contrast b   fallback for contrast
 //   org.kde.kdeglobals.Colors:Window, :View, :Button, :Selection
 //                                  BackgroundNormal, ForegroundNormal (and
@@ -69,6 +72,12 @@ Appearance :: struct {
 	// cursor-shape protocol. Empty and 0 when unsaid.
 	cursor_theme:        [128]u8,
 	cursor_size:         i32,
+	// The text caret's blink: org.gnome.desktop.interface cursor-blink
+	// (false → steady_caret), cursor-blink-time (the whole on-and-off cycle,
+	// ms) and cursor-blink-timeout (s). 0 when unsaid.
+	steady_caret:        bool,
+	caret_cycle_ms:      i32,
+	caret_timeout_s:     i32,
 	// A title bar's choices, in GNOME's words, NUL-padded, empty when unsaid
 	button_layout:       [128]u8, // org.gnome.desktop.wm.preferences button-layout (":minimize,maximize,close")
 	double_click:        [32]u8,  // org.gnome.desktop.wm.preferences action-double-click-titlebar ("toggle-maximize")
@@ -270,6 +279,12 @@ settings_apply :: proc(a: ^Appearance, namespace, key: string, value: dbus.Value
 			if s, ok := dbus.as_string(value); ok do set_padded(a.cursor_theme[:], s)
 		case "cursor-size":
 			if n, ok := dbus.as_i32(value); ok && n > 0 do a.cursor_size = n
+		case "cursor-blink":
+			if b, ok := dbus.as_bool(value); ok do a.steady_caret = !b
+		case "cursor-blink-time":
+			if n, ok := dbus.as_i32(value); ok && n > 0 do a.caret_cycle_ms = n
+		case "cursor-blink-timeout":
+			if n, ok := dbus.as_i32(value); ok && n > 0 do a.caret_timeout_s = n
 		case "color-scheme":
 			if a.has_appearance_ns do break
 			if s, ok := dbus.as_string(value); ok {

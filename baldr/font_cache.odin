@@ -179,6 +179,7 @@ tree_fonts_changed :: proc(t: ^Tree) {
 	for &d, i in t.nodes {
 		if i == 0 || .Alive not_in d.flags do continue
 		d.flags += {.Dirty_Layout, .Dirty_Paint}
+		d.flags -= {.Blink_Only}
 	}
 	for n, _ in t.layers do if d := node_get(t, n); d != nil do d.flags += {.Layer_Dirty}
 	for _, &s in t.areas {

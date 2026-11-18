@@ -664,7 +664,9 @@ reports an interactive node with no name — it must stay silent on the
 gallery.
 
 The toolkit follows the desktop's text scale, reduce motion and reduce
-transparency. On Linux the text scale includes the desktop's UI font size:
+transparency, and its text caret's blink: whether it blinks, how fast, and
+when it stops (a caret left alone stops blinking, shown, after 10 seconds
+where the desktop does not say). On Linux the text scale includes the desktop's UI font size:
 Baldr's type is drawn for an 11 pt desktop font, GNOME's default, so a
 desktop set to 13 pt draws it 13/11 larger, on top of any Large Text, as GTK
 does. Windows' font size is its Text size setting, which is the text scale
@@ -961,7 +963,7 @@ in an app that ships them: [`THIRD_PARTY.md`](../THIRD_PARTY.md) lists them.
 ## Testing without a window
 
 Layout, reconcile, paint and accessibility all run headless. No GPU, no
-compositor, no window — which is why the suite is 1,594 tests and runs in
+compositor, no window — which is why the suite is 1,604 tests and runs in
 under a second.
 
 ```odin

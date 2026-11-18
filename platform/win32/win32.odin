@@ -448,6 +448,14 @@ system_theme :: proc(b: ^platform.Backend) -> platform.Ev_Theme {
 	if win.SystemParametersInfoW(win.SPI_GETCLIENTAREAANIMATION, 0, &anim, 0) {
 		t.reduce_motion = anim == win.FALSE
 	}
+	// The text caret: its blink rate, or none, and when it stops.
+	if bt := GetCaretBlinkTime(); bt == win.INFINITE {
+		t.steady_caret = true
+	} else if bt > 0 {
+		t.caret_blink_ms = f32(bt)
+	}
+	stop: win.DWORD
+	if win.SystemParametersInfoW(SPI_GETCARETTIMEOUT, 0, &stop, 0) && stop > 0 do t.caret_blink_timeout_ms = f32(stop)
 	hc := HIGHCONTRASTW{cbSize = size_of(HIGHCONTRASTW)}
 	if win.SystemParametersInfoW(win.SPI_GETHIGHCONTRAST, hc.cbSize, &hc, 0) {
 		t.high_contrast = hc.dwFlags & HCF_HIGHCONTRASTON != 0

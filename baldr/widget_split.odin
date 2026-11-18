@@ -79,10 +79,11 @@ split_set_back_label :: proc(t: ^Tree, sp: ^Split_State, label: string) {
 }
 
 // split opens the container: exactly two `pane` scopes follow. Close with end.
+// `tag` comes back as on_change's `Ev.tag`: which window's split was dragged.
 split :: proc(ui: ^Ui($Msg), size: f32, on_change: Handler(Msg, f32) = nil, axis: Axis = .Row,
 	min: f32 = SPLIT_MIN_DEFAULT, max: f32 = 0, sized: Split_Sized = .First,
 	collapse: Collapse = .Never, detail := false, on_close: Maybe(Msg) = nil, back_label: string = "Back",
-	gap: Space = Space_Token.none, flex: f32 = 1, width: f32 = 0, height: f32 = 0, key: u64 = 0, loc := #caller_location) -> Node {
+	gap: Space = Space_Token.none, flex: f32 = 1, width: f32 = 0, height: f32 = 0, tag: u64 = 0, key: u64 = 0, loc := #caller_location) -> Node {
 	t := &ui.tree
 	n, created := reconcile_child(ui, .Box, key, loc)
 	d := node_get(t, n)
@@ -90,6 +91,7 @@ split :: proc(ui: ^Ui($Msg), size: f32, on_change: Handler(Msg, f32) = nil, axis
 		d.access.role = .Group
 		t.splits[n] = {divider = NODE_NONE, first = NODE_NONE, second = NODE_NONE, divider_w = SPLIT_DIVIDER_W}
 	}
+	d.tag = tag // on_change's Ev.tag
 	ax := Axis.Column if axis == .Column else Axis.Row
 	gutter := space_px(&t.theme, gap) // either side of the divider; the panes need no padding towards it
 	set_layout(t, n, Layout_Props{axis = ax, align = .Stretch, flex = flex, width = width, height = height, gap = gutter})

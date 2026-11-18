@@ -335,12 +335,19 @@ tree_use_text_engine :: proc(t: ^Tree, te: ^Text_Engine) {
 // `max_w` when it is > 0. Height is lines × text_line_height; "" is one
 // line. Falls back to the mono measurer when the tree has no engine.
 text_measure :: proc(t: ^Tree, s: string, size: f32, max_w: f32, weight: Font_Weight, mono: bool = false, family: Family_Id = 0, tabular: bool = false) -> [2]f32 {
+	return text_measure_as(t, s, size, max_w, weight, mono, family, tabular)
+}
+
+// text_measure_as is text_measure with the italic face as an option, which
+// the Text_Measure hook does not carry.
+@(private)
+text_measure_as :: proc(t: ^Tree, s: string, size: f32, max_w: f32, weight: Font_Weight, mono: bool = false, family: Family_Id = 0, tabular: bool = false, italic := false) -> [2]f32 {
 	te := t.text
 	if te == nil || !te.ok do return measure_text_mono(t, s, size, max_w, weight, mono, family, tabular)
 	if !text_size_ok(size) do return {0, 0}
 	lh := text_line_height(te, size, mono, family)
 	if len(s) == 0 do return {0, lh}
-	lines := text_lines(te, s, size, max(max_w, 0), weight, mono, family = family, tabular = tabular)
+	lines := text_lines(te, s, size, max(max_w, 0), weight, mono, italic = italic, family = family, tabular = tabular)
 	w: f32
 	for l in lines do w = max(w, l.width)
 	return {w, f32(max(len(lines), 1)) * lh}

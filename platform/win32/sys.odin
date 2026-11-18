@@ -23,7 +23,14 @@ foreign user32 {
 	// What Windows calls a key, for `Backend.key_name`. Not in
 	// core:sys/windows, and there is no unlocalised form of it.
 	GetKeyNameTextW                     :: proc(lParam: win.LONG, lpString: [^]win.WCHAR, cchSize: win.c_int) -> win.c_int ---
+	// The caret's half-period in ms (Settings > Accessibility > Text
+	// cursor), INFINITE when it does not blink, 0 on failure.
+	GetCaretBlinkTime                   :: proc() -> win.UINT ---
 }
+
+// SPI_GETCARETTIMEOUT is how long the caret blinks with no input before it
+// stops, in ms (Windows 10 and later; a DWORD).
+SPI_GETCARETTIMEOUT :: 0x2022
 
 @(default_calling_convention="system")
 foreign dwmapi {

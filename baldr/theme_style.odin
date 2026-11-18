@@ -978,6 +978,7 @@ Tree_Row_Style :: struct {
 	icon_size:       Maybe(f32),
 	text:            Text_Override,
 	ink:             Maybe(Color),  // label and icon
+	muted_ink:       Maybe(Color),  // …of a muted row (tree_item's `muted`)
 	branch_icon_ink: Maybe(Color),  // a branch's icon while it is not selected
 	chevron_ink:     Maybe(Color),
 	guide:           Maybe(Color),  // the indent guides, one hairline per level
@@ -995,6 +996,7 @@ Tree_Row_Look :: struct {
 	icon_size:       f32,
 	text:            Text_Look,
 	ink:             Color,
+	muted_ink:       Color,
 	branch_icon_ink: Color,
 	chevron_ink:     Color,
 	guide:           Color,
@@ -1019,6 +1021,7 @@ tree_row_look :: proc "contextless" (th: ^Theme) -> Tree_Row_Look {
 		icon_size       = s.icon_size.? or_else ICON_SIZE,
 		text            = text_look(th, .Body, s.text),
 		ink             = s.ink.? or_else c.on_surface,
+		muted_ink       = s.muted_ink.? or_else c.on_surface_muted,
 		branch_icon_ink = s.branch_icon_ink.? or_else c.accent_text,
 		chevron_ink     = s.chevron_ink.? or_else chevron,
 		guide           = s.guide.? or_else c.outline_variant,

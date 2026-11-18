@@ -2377,16 +2377,11 @@ paint_text_area :: proc(t: ^Tree, n: Node, d: ^Node_Data, l: ^Layer) {
 		cy := inner.y - off + block_text_top(t, s, s.caret.block) + f32(line) * clh
 		cx += block_indent(t, s, s.caret.block)
 		if !s.was_focused do s.blink_start = t.now_ms
-		elapsed := t.now_ms - s.blink_start
-		if elapsed < 0 {
-			s.blink_start = t.now_ms
-			elapsed = 0
-		}
-		phase := int((elapsed + 1) / CARET_BLINK_MS)
+		r := Rect{text_x + cx, cy, 1, clh}
 		caret := area_ink(t, s)
 		caret.a *= t.paint_opacity
-		if phase % 2 == 0 do append(&l.cmds, Draw_Rect{rect = {text_x + cx, cy, 1, clh}, color = caret})
-		tree_wake_at(t, s.blink_start + f64(phase + 1) * CARET_BLINK_MS, n)
+		if caret_shown(t, n, &s.blink_start) do append(&l.cmds, Draw_Rect{rect = r, color = caret})
+		caret_painted(t, r)
 	}
 	if gutter_clip do append(&l.cmds, Draw_Clip_Pop{}) // the text column: the caret is inside it too
 	s.was_focused = focused && !disabled

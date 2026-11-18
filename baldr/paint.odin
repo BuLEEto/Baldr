@@ -235,7 +235,7 @@ emit_node :: proc(t: ^Tree, n: Node, l: ^Layer, is_layer_root: bool, clip: Rect,
 	d := node_get(t, n)
 	if d == nil do return
 	if .Hidden in d.flags {
-		d.flags -= {.Dirty_Paint}
+		d.flags -= {.Dirty_Paint, .Blink_Only}
 		return
 	}
 	// This node is the glass on a surface adapted only where it is marked:
@@ -316,7 +316,7 @@ emit_node :: proc(t: ^Tree, n: Node, l: ^Layer, is_layer_root: bool, clip: Rect,
 	}
 	if op <= 0.002 {
 		paint_left_behind(t, n, {}, clip)
-		d.flags -= {.Dirty_Paint}
+		d.flags -= {.Dirty_Paint, .Blink_Only}
 		return
 	}
 	// On Clear glass, text and icons get a glow: what this node holds is on
@@ -349,13 +349,19 @@ emit_node :: proc(t: ^Tree, n: Node, l: ^Layer, is_layer_root: bool, clip: Rect,
 	bounds.y += sh.y
 	if !rect_intersects(bounds, clip) {
 		paint_left_behind(t, n, {}, clip)
-		d.flags -= {.Dirty_Paint}
+		d.flags -= {.Dirty_Paint, .Blink_Only}
 		return
 	}
+	blink_only := false // only its caret's blink changed: the damage waits for its paint to say where the caret is
 	if .Dirty_Paint in d.flags {
-		if t.debug_damage && !t.damage_off do damage_log(t, n, "painted", rect_clip(bounds, clip))
-		damage_add(t, rect_clip(bounds, clip))
-		d.flags -= {.Dirty_Paint}
+		blink_only = .Blink_Only in d.flags
+		if blink_only {
+			t.blink_said = false
+		} else {
+			if t.debug_damage && !t.damage_off do damage_log(t, n, "painted", rect_clip(bounds, clip))
+			damage_add(t, rect_clip(bounds, clip))
+		}
+		d.flags -= {.Dirty_Paint, .Blink_Only}
 		// the drag ghost draws the dragged item's layer: what changes in it
 		// changes on screen where the ghost is too, this same frame
 		if t.drag_source != NODE_NONE {
@@ -467,7 +473,7 @@ emit_node :: proc(t: ^Tree, n: Node, l: ^Layer, is_layer_root: bool, clip: Rect,
 		// cut at the box's sides only: accents and descenders may still overhang
 		lines_h := max(d.abs.h, tk.drawn_h)
 		if tk.spills do append(&l.cmds, Draw_Clip_Push{rect = {d.abs.x, d.abs.y - lines_h, d.abs.w, lines_h * 3}})
-		append(&l.cmds, Draw_Text{pos = {d.abs.x, d.abs.y + tk.inset_y}, str = shown, size = tk.size, color = fg, wrap_w = tk.wrap_w, weight = tk.weight, align = tk.align, box_w = d.abs.w, mono = tk.mono, family = tk.family, tabular = tk.tabular})
+		append(&l.cmds, Draw_Text{pos = {d.abs.x, d.abs.y + tk.inset_y}, str = shown, size = tk.size, color = fg, wrap_w = tk.wrap_w, weight = tk.weight, align = tk.align, box_w = d.abs.w, mono = tk.mono, italic = tk.italic, family = tk.family, tabular = tk.tabular})
 		if tk.spills do append(&l.cmds, Draw_Clip_Pop{})
 	}
 	if ck, ok := d.kind.(Custom_Kind); ok && ck.paint != nil do ck.paint(t, n, d, l)
@@ -482,6 +488,11 @@ emit_node :: proc(t: ^Tree, n: Node, l: ^Layer, is_layer_root: bool, clip: Rect,
 		child_clip = rect_clip(clip, cut)
 	}
 	if _, ok := d.kind.(Text_Input_Kind); ok do paint_text_input(t, n, d, l) // text_input hook
+	if blink_only {
+		r := rect_clip(t.blink_rect if t.blink_said else bounds, clip) // a painter that did not say is presented whole
+		if t.debug_damage && !t.damage_off do damage_log(t, n, "caret", r)
+		damage_add(t, r)
+	}
 	if t.debug_bounds do bounds_check(t, d, l.cmds[own_from:], bounds, clip)
 	for c := d.first; c != NODE_NONE; c = node_get(t, c).next {
 		emit_node(t, c, l, false, child_clip, op, sh, mine)

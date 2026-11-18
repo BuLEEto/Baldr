@@ -1103,10 +1103,12 @@ box :: proc(ui: ^Ui($Msg), width: f32 = 0, height: f32 = 0, flex: f32 = 0, bg: C
 // is machinery rather than prose — a tool step under a reply, a hash, a
 // path — so the words around it lead. `family` draws it in a family of its
 // own instead: one this machine has (`text_family`) or one the app carries
-// (`text_family_bytes`), such as a wordmark's face.
+// (`text_family_bytes`), such as a wordmark's face. `italic` sets it in the
+// face's italic: a title, a term being defined, a tab that is only a
+// preview. It is a look and nothing more; a screen reader is not told.
 text :: proc(ui: ^Ui($Msg), s: string, role: Text_Role = .Body, size: f32 = 0, color: Color = {},
 	muted := false, nowrap := false, ellipsis: Ellipsis = .None, max_lines := 0, align: Text_Align = .Start,
-	weight: Maybe(Font_Weight) = nil, mono := false, family: Family_Id = 0, tabular := false,
+	weight: Maybe(Font_Weight) = nil, mono := false, family: Family_Id = 0, tabular := false, italic := false,
 	sensitive := false,
 	width: f32 = 0, min_width: f32 = 0, max_width: f32 = 0, flex: f32 = 0,
 	key: u64 = 0, loc := #caller_location) -> Node {
@@ -1123,7 +1125,7 @@ text :: proc(ui: ^Ui($Msg), s: string, role: Text_Role = .Body, size: f32 = 0, c
 	wt := weight.? or_else st.weight
 	family := family
 	if family == 0 && !mono do family = role_family(&t.theme, role) // the family the theme sets this step in, if it names one
-	if tk, ok := d.kind.(Text_Kind); ok && (tk.size != px || tk.weight != wt || tk.nowrap != nowrap || tk.ellipsis != ellipsis || tk.max_lines != max_lines || tk.align != align || tk.mono != mono || tk.family != family || tk.tabular != tabular) {
+	if tk, ok := d.kind.(Text_Kind); ok && (tk.size != px || tk.weight != wt || tk.nowrap != nowrap || tk.ellipsis != ellipsis || tk.max_lines != max_lines || tk.align != align || tk.mono != mono || tk.family != family || tk.tabular != tabular || tk.italic != italic) {
 		tk.size = px
 		tk.weight = wt
 		tk.nowrap = nowrap
@@ -1133,6 +1135,7 @@ text :: proc(ui: ^Ui($Msg), s: string, role: Text_Role = .Body, size: f32 = 0, c
 		tk.mono = mono
 		tk.family = family
 		tk.tabular = tabular
+		tk.italic = italic
 		d.kind = tk
 		mark_layout_dirty(t, n)
 	}
@@ -1258,7 +1261,7 @@ button :: proc(ui: ^Ui($Msg), label: string, on_click: Msg, variant: Button_Vari
 		// a label never wraps: a row shrinks what can give instead; under a max_width it ends in "…" where cut
 		tl := sz.text // size 0 and family "": the Label step's
 		lbl := text(ui, label, role = .Label, size = tl.size, weight = tl.weight, family = look_family(t, tl.family), color = fg, nowrap = true,
-			ellipsis = .End if o.max_width > 0 else .None, key = u64(Control_Part.Label), loc = loc)
+			ellipsis = .End if o.max_width > 0 else .None, italic = o.italic, key = u64(Control_Part.Label), loc = loc)
 		set_role(t, lbl, .None) // the button carries the name; its label is not a separate a11y node
 	}
 	close_scope(ui)
@@ -1290,7 +1293,9 @@ BUTTON_SMALL_TEXT :: f32(12) // a Small button's label size
 // wash off, for a control that answers the pointer another way (a dock's
 // icons grow, so the wash would say it twice): it still hovers, presses,
 // takes the keyboard and shows its focus ring, mark, badge and tooltip, and
-// reads the same to a screen reader — only the wash goes.
+// reads the same to a screen reader — only the wash goes. `italic` sets the
+// label in italics (a tab that is only a preview, which the next file opened
+// replaces); say what it means in its tooltip or description too.
 // An option left out keeps what the button had, so a mark, a badge or a bar
 // goes only when you pass its empty value: a mark with `length = 0`, an
 // empty `Button_Badge{}`, a negative `progress`.
@@ -1298,7 +1303,7 @@ BUTTON_SMALL_TEXT :: f32(12) // a Small button's label size
 button_options :: proc(ui: ^Ui($Msg), n: Node, max_width: Maybe(f32) = nil, icon_size: Maybe(f32) = nil, icon_color: Maybe(Color) = nil,
 	mark: Maybe(Button_Mark) = nil, badge: Maybe(Button_Badge) = nil, progress: Maybe(f32) = nil, quiet: Maybe(bool) = nil,
 	focus_on_click: Maybe(bool) = nil, // focus_on_click is on `button` too: a tools column sets it on every one
-	progress_style: Maybe(Progress_Style) = nil, indeterminate: Maybe(bool) = nil) {
+	progress_style: Maybe(Progress_Style) = nil, indeterminate: Maybe(bool) = nil, italic: Maybe(bool) = nil) {
 	t := &ui.tree
 	d := node_get(t, n)
 	if d == nil || (d.access.role != .Button && d.access.role != .Toggle_Button) do return
@@ -1316,6 +1321,7 @@ button_options :: proc(ui: ^Ui($Msg), n: Node, max_width: Maybe(f32) = nil, icon
 	if v, ok := badge.?; ok do button_badge_set(t, n, d, v)
 	if progress != nil || progress_style != nil || indeterminate != nil do button_progress_set(t, n, d, progress, progress_style, indeterminate)
 	if v, ok := focus_on_click.?; ok do focus_on_click_set(t, d, v)
+	if v, ok := italic.?; ok do o.italic = v
 	if v, ok := quiet.?; ok && v != o.quiet {
 		o.quiet = v
 		button_quiet_set(t, n, d, v)
@@ -1333,8 +1339,9 @@ button_options :: proc(ui: ^Ui($Msg), n: Node, max_width: Maybe(f32) = nil, icon
 		if cd.key >= control_part_icons(0) do part = .Icon // one of `icons`: sized and coloured as the icon is
 		#partial switch part {
 		case .Label:
-			if tk, ok := &cd.kind.(Text_Kind); ok && (tk.ellipsis != .None) != (o.max_width > 0) {
+			if tk, ok := &cd.kind.(Text_Kind); ok && ((tk.ellipsis != .None) != (o.max_width > 0) || tk.italic != o.italic) {
 				tk.ellipsis = .End if o.max_width > 0 else .None
+				tk.italic = o.italic
 				mark_layout_dirty(t, ch)
 			}
 		case .Image, .Icon, .Theme_Icon:
@@ -1374,6 +1381,7 @@ Button_Opts :: struct {
 	icon_color:           Color,
 	mark:                 Button_Mark,
 	quiet:                bool,
+	italic:               bool,
 }
 
 // Button_Mark is a mark a button draws inside its edge, taking no room: a

@@ -75,7 +75,7 @@ drawn_text_rect :: proc(t: ^Tree, v: Draw_Text) -> Rect {
 	if v.str == "" do return {}
 	m: [2]f32
 	if te := t.text; te != nil && te.ok {
-		m = text_measure(t, v.str, v.size, v.wrap_w, v.weight, v.mono, v.family, v.tabular) // what render draws with
+		m = text_measure_as(t, v.str, v.size, v.wrap_w, v.weight, v.mono, v.family, v.tabular, v.italic) // what render draws with
 	} else if t.measure_text != nil {
 		m = t.measure_text(t, v.str, v.size, v.wrap_w, v.weight, v.mono, v.family, v.tabular)
 	}

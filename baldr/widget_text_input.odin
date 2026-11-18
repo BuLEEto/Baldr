@@ -31,10 +31,6 @@ TEXT_INPUT_MIN_WIDTH :: f32(96)
 // neither `width` nor `flex` nor the parent's stretch decides it.
 TEXT_INPUT_DEFAULT_WIDTH :: f32(240)
 
-// CARET_BLINK_MS is the caret's half-period: visible for this long, then
-// hidden for this long, while the field is focused and idle.
-CARET_BLINK_MS :: 530.0
-
 // MULTI_CLICK_MS / MULTI_CLICK_PX: a press this soon and this close to the
 // previous one counts as a double (then triple) click.
 MULTI_CLICK_MS :: 400.0
@@ -709,29 +705,25 @@ paint_text_input :: proc(t: ^Tree, n: Node, d: ^Node_Data, l: ^Layer) {
 	}
 	if focused && !disabled {
 		if !s.was_focused do s.blink_start = t.now_ms
-		elapsed := t.now_ms - s.blink_start
-		if elapsed < 0 {
-			s.blink_start = t.now_ms
-			elapsed = 0
-		}
-		phase := int((elapsed + 1) / CARET_BLINK_MS) // +1 ms: a wake that lands a hair early still flips
-		if phase % 2 == 0 {
+		r := Rect{x0 + caret_x, text_y, lk.caret_width, lh}
+		if caret_shown(t, n, &s.blink_start) {
 			caret := lk.caret
 			caret.a *= t.paint_opacity
-			append(&l.cmds, Draw_Rect{rect = {x0 + caret_x, text_y, lk.caret_width, lh}, color = caret})
+			append(&l.cmds, Draw_Rect{rect = r, color = caret})
 		}
-		tree_wake_at(t, s.blink_start + f64(phase + 1) * CARET_BLINK_MS, n) // the timer repaints this field
+		caret_painted(t, r)
 	}
 	s.was_focused = focused && !disabled
 	append(&l.cmds, Draw_Clip_Pop{})
 }
 
-// text_input_wake is called by the run loop when a requested wake fires: the
-// focused field repaints so its caret blink advances.
+// text_input_wake repaints the focused field's or editor's caret. The
+// tree's timers already do this when a blink is due, so an app has no need
+// to call it.
 text_input_wake :: proc(t: ^Tree) {
 	if d := node_get(t, t.focus); d != nil {
-		if _, ok := d.kind.(Text_Input_Kind); ok do mark_paint_dirty(t, t.focus)
-		if _, ok := t.areas[t.focus]; ok do mark_paint_dirty(t, t.focus)
+		if _, ok := d.kind.(Text_Input_Kind); ok do mark_blink_dirty(t, t.focus)
+		if _, ok := t.areas[t.focus]; ok do mark_blink_dirty(t, t.focus)
 	}
 }
 

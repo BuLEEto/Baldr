@@ -103,6 +103,9 @@ theme_event :: proc(a: ^portal.Appearance) -> platform.Ev_Theme {
 		button_layout       = portal.appearance_button_layout(a),
 		double_click        = portal.appearance_double_click(a),
 		palette             = kde_palette(a),
+		steady_caret           = a.steady_caret,
+		caret_blink_ms         = f32(a.caret_cycle_ms) / 2, // GNOME states the whole cycle; the half is what each phase lasts
+		caret_blink_timeout_ms = f32(a.caret_timeout_s) * 1000,
 	}
 }
 

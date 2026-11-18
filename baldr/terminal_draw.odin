@@ -18,10 +18,6 @@ import norm "baldr:third_party/runa/normalize"
 // `pos`, at `alpha` (its fade).
 Draw_Cells :: struct { node: Node, pos: [2]f32, alpha: f32 }
 
-// TERM_BLINK_IDLE_MS is how long after the last key a blinking cursor goes
-// on blinking; then it stays shown, so an idle terminal wakes nothing.
-@(private) TERM_BLINK_IDLE_MS :: 10_000.0
-
 // TERM_DIM_ALPHA is how much of its colour dim (faint) text keeps.
 @(private) TERM_DIM_ALPHA :: f32(0.6)
 
@@ -138,9 +134,14 @@ paint_terminal :: proc(t: ^Tree, n: Node, d: ^Node_Data, l: ^Layer) {
 	append(&l.cmds, Draw_Clip_Push{d.abs}) // a wide glyph at the last column may reach into the margin, not past the node
 	append(&l.cmds, Draw_Cells{node = n, pos = {g.x, g.y}, alpha = t.paint_opacity})
 	append(&l.cmds, Draw_Clip_Pop{})
-	if term_blinking(t, n, st) { // the next time it turns on or off
-		k := math.floor((t.now_ms - st.blink_from) / CARET_BLINK_MS)
-		tree_wake_at(t, st.blink_from + (k + 1) * CARET_BLINK_MS, n)
+	if term_blinking(t, n, st) { // the next time it turns on or off, and where, for a repaint of the cursor alone
+		half, timeout, _ := caret_timing(t)
+		k := math.floor((t.now_ms - st.blink_from) / half)
+		wake_at(t, min(st.blink_from + (k + 1) * half, st.blink_from + timeout), n, blink = true)
+		cur, c := st.screen.cursor, st.px.logical
+		cells := term_row(st.screen, cur.row)
+		span := 2 if cur.col < len(cells) && cells[cur.col].width == 2 else 1
+		caret_painted(t, {g.x + f32(cur.col) * c.advance, g.y + f32(cur.row) * c.line_height, f32(span) * c.advance, c.line_height})
 	}
 }
 
@@ -151,13 +152,15 @@ term_has_keyboard :: proc(t: ^Tree, n: Node, st: ^Term_State) -> bool {
 	return t.focus == n && st.keyboard
 }
 
-// term_blinking: its cursor blinks now (asked for, shown, focused, motion
-// allowed, and a key pressed lately).
+// term_blinking: its cursor blinks now (asked for, shown, in the grid,
+// focused, a blinking caret wanted here, and a key pressed lately).
 @(private)
 term_blinking :: proc(t: ^Tree, n: Node, st: ^Term_State) -> bool {
 	s := st.screen
-	return s != nil && s.cursor.blink && !s.cursor.hidden && !t.theme.motion.reduce && term_has_keyboard(t, n, st) &&
-		t.now_ms - st.blink_from < TERM_BLINK_IDLE_MS
+	if s == nil || !s.cursor.blink || s.cursor.hidden || !term_has_keyboard(t, n, st) do return false
+	if s.cursor.row < 0 || s.cursor.row >= s.rows || s.cursor.col < 0 || s.cursor.col >= s.cols do return false
+	_, timeout, blinks := caret_timing(t)
+	return blinks && t.now_ms - st.blink_from < timeout
 }
 
 // term_blink_restart shows a blinking cursor again from now (a key).
@@ -453,7 +456,10 @@ term_cursor_cmds :: proc(t: ^Tree, te: ^Text_Engine, n: Node, st: ^Term_State, s
 		append(out, Term_Cmd{rect = {x + w - b, y + b, b, f32(p.line) - 2 * b}, color = col, page = -1})
 		return
 	}
-	if term_blinking(t, n, st) && int((t.now_ms - st.blink_from) / CARET_BLINK_MS) % 2 == 1 do return
+	if term_blinking(t, n, st) {
+		half, _, _ := caret_timing(t)
+		if int((t.now_ms - st.blink_from) / half) % 2 == 1 do return
+	}
 	switch cur.shape {
 	case .Block:
 		append(out, Term_Cmd{rect = {x, y, w, f32(p.line)}, color = col, page = -1})

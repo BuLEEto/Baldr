@@ -229,19 +229,19 @@ quit :: proc($Msg: typeid) -> Cmd(Msg)
 
 ```odin
 open_files :: proc($Msg: typeid, on_done: Handler(Msg, Files), title: string = "", multiple := false, directory := false,
-	filters: []File_Filter = {}, folder: string = "", accept_label: string = "") -> Cmd(Msg)
+	filters: []File_Filter = {}, folder: string = "", accept_label: string = "", tag: u64 = 0) -> Cmd(Msg)
 ```
 
-open_files asks for the desktop's open dialog; the handler receives Files with the chosen path(s), or ok = false when cancelled.  case Pick: return baldr.open_files(Msg, proc(e: baldr.Ev(baldr.Files)) -> Msg { return Picked{e.value} }, title = "Choose an image", filters = {{name = "Images", patterns = {"*.png", "*.jpg"}}}) The strings and filters are copied for the rest of the loop iteration: literals written inside update (which live on its stack) are fine.
+open_files asks for the desktop's open dialog; the handler receives Files with the chosen path(s), or ok = false when cancelled. `tag` comes back as the `Ev`'s tag: which window or document asked, when several can.  case Pick: return baldr.open_files(Msg, proc(e: baldr.Ev(baldr.Files)) -> Msg { return Picked{e.value} }, title = "Choose an image", filters = {{name = "Images", patterns = {"*.png", "*.jpg"}}}) The strings and filters are copied for the rest of the loop iteration: literals written inside update (which live on its stack) are fine.
 
 ### `save_file`
 
 ```odin
 save_file :: proc($Msg: typeid, on_done: Handler(Msg, Files), title: string = "", name: string = "",
-	filters: []File_Filter = {}, folder: string = "", accept_label: string = "") -> Cmd(Msg)
+	filters: []File_Filter = {}, folder: string = "", accept_label: string = "", tag: u64 = 0) -> Cmd(Msg)
 ```
 
-save_file asks for the desktop's save dialog; the handler receives one path to write, or ok = false and `why`. Pass `folder` where you can; on Linux a dialog given none starts in the home folder, because the desktop's dialog service would otherwise start in whatever folder it was itself started from — which can be `/`.
+save_file asks for the desktop's save dialog; the handler receives one path to write, or ok = false and `why`. Pass `folder` where you can; on Linux a dialog given none starts in the home folder, because the desktop's dialog service would otherwise start in whatever folder it was itself started from — which can be `/`. `tag` comes back as the `Ev`'s tag, as `open_files`' does.
 
 ### `files_deliver`
 
@@ -249,7 +249,7 @@ save_file asks for the desktop's save dialog; the handler receives one path to w
 files_deliver :: proc(h: Handler($Msg, Files), files: Files, token: u64, out: ^[dynamic]Msg) -> bool
 ```
 
-files_deliver turns a dialog outcome into the app's message through the command's handler (a plain message, or a proc given Ev{value, tag = token}); nil delivers nothing.
+files_deliver turns a dialog outcome into the app's message through the command's handler (a plain message, or a proc given Ev{value, tag = token}); nil delivers nothing. The run loop passes the command's `tag` as `token`.
 
 ### `Frame_Ctx`
 
@@ -564,13 +564,13 @@ box is a leaf rectangle: spacing, dividers, colour swatches, a frame. `border` o
 ```odin
 text :: proc(ui: ^Ui($Msg), s: string, role: Text_Role = .Body, size: f32 = 0, color: Color = {},
 	muted := false, nowrap := false, ellipsis: Ellipsis = .None, max_lines := 0, align: Text_Align = .Start,
-	weight: Maybe(Font_Weight) = nil, mono := false, family: Family_Id = 0, tabular := false,
+	weight: Maybe(Font_Weight) = nil, mono := false, family: Family_Id = 0, tabular := false, italic := false,
 	sensitive := false,
 	width: f32 = 0, min_width: f32 = 0, max_width: f32 = 0, flex: f32 = 0,
 	key: u64 = 0, loc := #caller_location) -> Node
 ```
 
-text is a run of text. `role` picks the size and weight from the theme's type scale (`size` and `weight`, Regular, Medium or Semibold, override them); zero `color` means the theme's on_surface. Its accessible name is its content. It is sized as any leaf is: a fixed `width`, `min_width` / `max_width`, or `flex` for a share of a row's free space; it wraps at the width it ends up with, and `align` places its lines in it. A label column and the values beside it are two texts in a row:  baldr.row(ui, gap = .md); { defer baldr.end(ui) baldr.text(ui, "Licence", muted = true, width = 170) baldr.text(ui, licence, flex = 1) }  `mono` sets it in the code face the editors use, for a run of text that is machinery rather than prose — a tool step under a reply, a hash, a path — so the words around it lead. `family` draws it in a family of its own instead: one this machine has (`text_family`) or one the app carries (`text_family_bytes`), such as a wordmark's face.
+text is a run of text. `role` picks the size and weight from the theme's type scale (`size` and `weight`, Regular, Medium or Semibold, override them); zero `color` means the theme's on_surface. Its accessible name is its content. It is sized as any leaf is: a fixed `width`, `min_width` / `max_width`, or `flex` for a share of a row's free space; it wraps at the width it ends up with, and `align` places its lines in it. A label column and the values beside it are two texts in a row:  baldr.row(ui, gap = .md); { defer baldr.end(ui) baldr.text(ui, "Licence", muted = true, width = 170) baldr.text(ui, licence, flex = 1) }  `mono` sets it in the code face the editors use, for a run of text that is machinery rather than prose — a tool step under a reply, a hash, a path — so the words around it lead. `family` draws it in a family of its own instead: one this machine has (`text_family`) or one the app carries (`text_family_bytes`), such as a wordmark's face. `italic` sets it in the face's italic: a title, a term being defined, a tab that is only a preview. It is a look and nothing more; a screen reader is not told.
 
 ### `Button_Variant`
 
@@ -611,10 +611,10 @@ Button_Size is how big a button is: Regular, or Small, compact.
 button_options :: proc(ui: ^Ui($Msg), n: Node, max_width: Maybe(f32) = nil, icon_size: Maybe(f32) = nil, icon_color: Maybe(Color) = nil,
 	mark: Maybe(Button_Mark) = nil, badge: Maybe(Button_Badge) = nil, progress: Maybe(f32) = nil, quiet: Maybe(bool) = nil,
 	focus_on_click: Maybe(bool) = nil, // focus_on_click is on `button` too: a tools column sets it on every one
-	progress_style: Maybe(Progress_Style) = nil, indeterminate: Maybe(bool) = nil)
+	progress_style: Maybe(Progress_Style) = nil, indeterminate: Maybe(bool) = nil, italic: Maybe(bool) = nil)
 ```
 
-button_options sets a button's rarer settings, each kept until changed. `max_width` caps its width (0: none): its label then ends in "…" where it is cut, and a tight row shortens it further; the whole label stays its accessible name and shows on hover (a window's title on a taskbar). `icon_size` sizes its icon, theme icon or picture (0: their own size). `icon_color` colours its icon or theme icon ({}: the label's colour); a full-colour theme icon keeps its colours and fades with the alpha (a pinned app that isn't running). `mark` is drawn inside the button's edge and takes no room (a taskbar's running-app dot or bar, Button_Mark); `badge` sits on its icon's top end corner, taking no room either (a count, or a bell's dot: Button_Badge). `progress` draws a thin bar across the bottom of its icon, 0…1, taking no room and clear of the badge (a download on a taskbar entry): 0 is an empty track, a negative value takes the bar away, and the value eases as it changes. `quiet` takes the hover and press wash off, for a control that answers the pointer another way (a dock's icons grow, so the wash would say it twice): it still hovers, presses, takes the keyboard and shows its focus ring, mark, badge and tooltip, and reads the same to a screen reader — only the wash goes. An option left out keeps what the button had, so a mark, a badge or a bar goes only when you pass its empty value: a mark with `length = 0`, an empty `Button_Badge{}`, a negative `progress`. Anything but a button is left alone.
+button_options sets a button's rarer settings, each kept until changed. `max_width` caps its width (0: none): its label then ends in "…" where it is cut, and a tight row shortens it further; the whole label stays its accessible name and shows on hover (a window's title on a taskbar). `icon_size` sizes its icon, theme icon or picture (0: their own size). `icon_color` colours its icon or theme icon ({}: the label's colour); a full-colour theme icon keeps its colours and fades with the alpha (a pinned app that isn't running). `mark` is drawn inside the button's edge and takes no room (a taskbar's running-app dot or bar, Button_Mark); `badge` sits on its icon's top end corner, taking no room either (a count, or a bell's dot: Button_Badge). `progress` draws a thin bar across the bottom of its icon, 0…1, taking no room and clear of the badge (a download on a taskbar entry): 0 is an empty track, a negative value takes the bar away, and the value eases as it changes. `quiet` takes the hover and press wash off, for a control that answers the pointer another way (a dock's icons grow, so the wash would say it twice): it still hovers, presses, takes the keyboard and shows its focus ring, mark, badge and tooltip, and reads the same to a screen reader — only the wash goes. `italic` sets the label in italics (a tab that is only a preview, which the next file opened replaces); say what it means in its tooltip or description too. An option left out keeps what the button had, so a mark, a badge or a bar goes only when you pass its empty value: a mark with `length = 0`, an empty `Button_Badge{}`, a negative `progress`. Anything but a button is left alone.
 
 ### `Button_Mark`
 
@@ -1345,10 +1345,13 @@ A11y_Prefs :: struct {
 	reduce_motion:       bool, // transitions off
 	reduce_transparency: bool, // glass becomes opaque surfaces
 	text_scale:          f32,  // the desktop's text size: 1 normal, 1.5 = "large text" (0 is read as 1)
+	steady_caret:           bool, // the text caret is shown without blinking
+	caret_blink_ms:         f32,  // the caret's half-period: shown this long, hidden this long (0: the default)
+	caret_blink_timeout_ms: f32,  // how long it blinks after the last key, click or move, then stays shown (0: the default)
 }
 ```
 
-A11y_Prefs are the desktop's accessibility preferences, which every theme follows whoever built it.
+A11y_Prefs are the desktop's accessibility preferences, which every theme follows whoever built it. The caret's blink is one: zero values are the toolkit's defaults (CARET_BLINK_MS, CARET_BLINK_TIMEOUT_MS), and reduced motion keeps the caret still as `steady_caret` does.
 
 ### `TEXT_SCALE_MIN`
 
@@ -1396,7 +1399,7 @@ follow_system_theme puts the tree back on the desktop's theme after `set_theme` 
 set_a11y_prefs :: proc(t: ^Tree, p: A11y_Prefs)
 ```
 
-set_a11y_prefs swaps the accessibility preferences this tree runs with — text size, reduce motion, reduce transparency — for a desktop that owns them and would rather say than be asked. They are folded into the theme the same way the desktop's are, they reach a size the app set itself as well as the theme's roles, and once set the desktop's preferences leave this tree alone (as a theme the app sets does). `App.a11y` says it for every surface at start-up. Builders resolve sizes when they run, so the view must be re-run afterwards; the run loop does this.
+set_a11y_prefs swaps the accessibility preferences this tree runs with — text size, reduce motion, reduce transparency, the caret's blink — for a desktop that owns them and would rather say than be asked. They are folded into the theme the same way the desktop's are, they reach a size the app set itself as well as the theme's roles, and once set the desktop's preferences leave this tree alone (as a theme the app sets does). `App.a11y` says it for every surface at start-up. Builders resolve sizes when they run, so the view must be re-run afterwards; the run loop does this.
 
 ### `follow_system_a11y`
 
@@ -2264,6 +2267,7 @@ Tree_Row_Style :: struct {
 	icon_size:       Maybe(f32),
 	text:            Text_Override,
 	ink:             Maybe(Color),  // label and icon
+	muted_ink:       Maybe(Color),  // …of a muted row (tree_item's `muted`)
 	branch_icon_ink: Maybe(Color),  // a branch's icon while it is not selected
 	chevron_ink:     Maybe(Color),
 	guide:           Maybe(Color),  // the indent guides, one hairline per level
@@ -2287,6 +2291,7 @@ Tree_Row_Look :: struct {
 	icon_size:       f32,
 	text:            Text_Look,
 	ink:             Color,
+	muted_ink:       Color,
 	branch_icon_ink: Color,
 	chevron_ink:     Color,
 	guide:           Color,
@@ -3638,14 +3643,6 @@ TEXT_INPUT_DEFAULT_WIDTH :: f32(240)
 
 TEXT_INPUT_DEFAULT_WIDTH is the field's intrinsic width (logical px) when neither `width` nor `flex` nor the parent's stretch decides it.
 
-### `CARET_BLINK_MS`
-
-```odin
-CARET_BLINK_MS :: 530.0
-```
-
-CARET_BLINK_MS is the caret's half-period: visible for this long, then hidden for this long, while the field is focused and idle.
-
 ### `MULTI_CLICK_MS`
 
 ```odin
@@ -3767,7 +3764,7 @@ text_inputs_destroy frees every field's state with the tree.
 text_input_wake :: proc(t: ^Tree)
 ```
 
-text_input_wake is called by the run loop when a requested wake fires: the focused field repaints so its caret blink advances.
+text_input_wake repaints the focused field's or editor's caret. The tree's timers already do this when a blink is due, so an app has no need to call it.
 
 ### `text_event`
 
@@ -5272,14 +5269,14 @@ tree_view opens a tree. Give it a size (`height`, or `flex` in a column) or let 
 
 ```odin
 tree_item :: proc(ui: ^Ui($Msg), label: string, on_click: Msg, expanded := false, on_change: Handler(Msg, bool) = nil,
-	selected := false, icon: Icon = .None, on_activate: Handler(Msg, int) = nil, disabled := false,
+	selected := false, icon: Icon = .None, on_activate: Handler(Msg, int) = nil, disabled := false, muted := false,
 	drag: string = "", on_drop: Handler(Msg, Drop) = nil, accepts: string = "", on_rest: Handler(Msg, Drag_Rest) = nil,
 	on_submit: Handler(Msg, string) = nil, on_cancel: Maybe(Msg) = nil,
 	on_context: Handler(Msg, int) = nil, on_middle_click: Maybe(Msg) = nil, drop_positions: Drop_Positions = {},
 	tag: u64 = 0, key: u64 = 0, loc := #caller_location) -> bool
 ```
 
-tree_item adds one row to the open tree (or branch). Returns whether its children scope is open — close it with end only then. Items without a `key` are identified by their label.
+tree_item adds one row to the open tree (or branch). Returns whether its children scope is open — close it with end only then. Items without a `key` are identified by their label. `muted` draws its label and icon in the muted ink and changes nothing else: a file the project leaves out, there but not part of it. `disabled` dims it and stops it working too. A selected row keeps the selection's ink, which is the one made to read on the selection's fill.
 
 ### `tree_rows_in_order`
 
@@ -5340,10 +5337,10 @@ Collapse: at and below which size class the split shows one pane at a time.
 split :: proc(ui: ^Ui($Msg), size: f32, on_change: Handler(Msg, f32) = nil, axis: Axis = .Row,
 	min: f32 = SPLIT_MIN_DEFAULT, max: f32 = 0, sized: Split_Sized = .First,
 	collapse: Collapse = .Never, detail := false, on_close: Maybe(Msg) = nil, back_label: string = "Back",
-	gap: Space = Space_Token.none, flex: f32 = 1, width: f32 = 0, height: f32 = 0, key: u64 = 0, loc := #caller_location) -> Node
+	gap: Space = Space_Token.none, flex: f32 = 1, width: f32 = 0, height: f32 = 0, tag: u64 = 0, key: u64 = 0, loc := #caller_location) -> Node
 ```
 
-split opens the container: exactly two `pane` scopes follow. Close with end.
+split opens the container: exactly two `pane` scopes follow. Close with end. `tag` comes back as on_change's `Ev.tag`: which window's split was dragged.
 
 ### `pane`
 
@@ -8153,6 +8150,26 @@ canvas_transform :: proc(g: Gpu, src: Canvas, x, y, w, h: int, dst: Canvas, m: m
 
 canvas_transform draws w × h texels at x, y of `src` into `dst` through `m`, which maps source texel space to destination texel space (texel centres at +0.5, as every other canvas op counts them). Affine matrices are the case that matters; a projective one works, its third row dividing.  Each destination texel it covers is sampled from the source through m⁻¹ with `filter`, then laid on by `mode` at `opacity` through `mask` (whose texels line up with the *destination*), exactly as canvas_blend lays a source on. With .Normal and opacity 1 it is a transformed copy.  Texels outside the source rectangle are transparent, so a rotated layer keeps a clean edge instead of smearing its border. False for a rectangle outside `src`, a mask not covering what is drawn, `src` being `dst`, a matrix that cannot be inverted, or no such canvas.
 
+## caret.odin
+
+The text caret's blink, shared by fields, editors and terminals: how fast it blinks, when it stops, and the wakes that drive it. A blink repaints only the caret (mark_blink_dirty), and a caret left alone stops blinking, shown, so an idle window wakes nothing.
+
+### `CARET_BLINK_MS`
+
+```odin
+CARET_BLINK_MS :: 530.0
+```
+
+CARET_BLINK_MS is the caret's half-period when the desktop does not set one: shown this long, then hidden this long.
+
+### `CARET_BLINK_TIMEOUT_MS`
+
+```odin
+CARET_BLINK_TIMEOUT_MS :: 10_000.0
+```
+
+CARET_BLINK_TIMEOUT_MS is how long a caret goes on blinking after the last key, click or move when the desktop does not say, as GTK's default; then it stays shown until the next one.
+
 ## chart_palette.odin
 
 ### `Chart_Palette`
@@ -9373,6 +9390,7 @@ Node_Flag :: enum u8 {
 	// invalidation
 	Dirty_Layout,      // size/position may have changed; layout pass must visit
 	Dirty_Paint,       // appearance changed; owning layer must re-emit this node
+	Blink_Only,        // with Dirty_Paint: only its caret's blink changed, so the damage is where its paint says the caret is (caret_painted)
 	Dirty_Root,        // queued in Tree.dirty_roots
 	Layer_Dirty,       // set on a Layer node when any node it paints is Dirty_Paint
 	// structure
@@ -9466,6 +9484,7 @@ Text_Kind :: struct {
 	// its width: a stopwatch, a column of figures. Only the digits'
 	// advances change, not the face.
 	tabular: bool,
+	italic:  bool, // the face's italic: a provisional thing, a title, a term — `text(italic = true)`
 	// A secret shown on purpose (a revealed key, a recovery phrase): the
 	// tree's copy is overwritten before it is freed, and the accessibility
 	// bridge gets the node without its characters. `text(sensitive = true)`.
@@ -9775,10 +9794,11 @@ Clipboard is the text clipboard hook the platform installs on the tree so widget
 Timer :: struct {
 	at_ms: f64,
 	node:  Node,
+	blink: bool,
 }
 ```
 
-Timer is a pending wake-up: repaint `node` (or just wake) at `at_ms`.
+Timer is a pending wake-up: repaint `node` (or just wake) at `at_ms`. `blink`: every ask it holds is a caret's blink, so only the caret repaints.
 
 ### `tree_wake_at`
 

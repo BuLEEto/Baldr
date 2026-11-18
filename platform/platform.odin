@@ -954,6 +954,12 @@ Ev_Theme :: struct {
 	// Windows contrast theme, a KDE colour scheme. `ok` false when it has
 	// none, and the toolkit generates its colours from `dark` and `accent`.
 	palette:       System_Palette,
+	// The text caret's blink: `steady_caret` when the desktop turned
+	// blinking off; its half-period and how long after the last key it
+	// stops, in ms, 0 where the desktop does not say.
+	steady_caret:           bool,
+	caret_blink_ms:         f32,
+	caret_blink_timeout_ms: f32,
 }
 
 // System_Palette is a desktop colour scheme in the roles every desktop
