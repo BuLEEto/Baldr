@@ -8607,7 +8607,7 @@ focus_from_pointer moves focus as a press should: to the nearest focusable node 
 set_focus :: proc(t: ^Tree, n: Node, visible: bool) -> (changed: bool)
 ```
 
-set_focus moves focus to `n` (or clears it with NODE_NONE). `visible` says whether the ring should show. Returns true when anything changed.
+set_focus moves focus to `n` (or clears it with NODE_NONE). `visible` says whether the ring should show. Returns true when anything changed. An editor's builder node stands for its text. A node that cannot take the keyboard is refused, and BALDR_DEBUG_EVENTS says so.
 
 ### `focus_next`
 
@@ -11983,7 +11983,7 @@ Chart_Hit :: struct {
 	series: int,
 	index:  int,
 	point:  Chart_Point,
-	name:   string, // the series' name, for the message that wants to say it
+	name:   string, // the series' name, for the message that wants to say it: the chart's copy, valid while the message is handled
 }
 ```
 
@@ -12000,7 +12000,7 @@ chart :: proc(ui: ^Ui($Msg), series: []Chart_Series, kind: Chart_Kind = .Line,
 	tag: u64 = 0, key: u64 = 0, loc := #caller_location) -> Node
 ```
 
-chart draws `series`. `kind` is what they are unless a series says otherwise; `label` names the chart for a screen reader and `describe` adds a sentence of context. `y_min` / `y_max` pin the value axis where the data alone would mislead (a rate read against 0–100); left out, they come from the data, rounded outwards to the tick. `x_labels` names the categories along the bottom, one per point. `x_min` / `x_max` pin the bottom axis the same way, so a window of time keeps its place and a series that starts partway across is drawn from where it starts. `x_grid` draws a vertical line at every multiple of it along x; the lines scroll as the range moves, so a steady value still reads as live. The value under the pointer is shown; arrow keys walk the points and Up / Down change series, and every series is in the accessibility tree.  baldr.chart(ui, sales[:], kind = .Bar, label = "Sales by month", x_labels = months[:], on_select = proc(e: baldr.Ev(baldr.Chart_Hit)) -> Msg { return Picked{e.value} })
+chart draws `series`. `kind` is what they are unless a series says otherwise; `label` names the chart for a screen reader and `describe` adds a sentence of context. `y_min` / `y_max` pin the value axis where the data alone would mislead (a rate read against 0–100); left out, they come from the data, rounded outwards to the tick. `x_labels` names the categories along the bottom, label i at x = i; bars stand on their x, so a missing category is a gap. `x_min` / `x_max` pin the bottom axis the same way, so a window of time keeps its place and a series that starts partway across is drawn from where it starts. `x_grid` draws a vertical line at every multiple of it along x; the lines scroll as the range moves, so a steady value still reads as live. The value under the pointer is shown; arrow keys walk the points and Up / Down change series, and every series is in the accessibility tree.  baldr.chart(ui, sales[:], kind = .Bar, label = "Sales by month", x_labels = months[:], on_select = proc(e: baldr.Ev(baldr.Chart_Hit)) -> Msg { return Picked{e.value} })
 
 ## widget_chrome.odin
 

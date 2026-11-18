@@ -583,33 +583,33 @@ rich_after_type :: proc(ui: ^Ui($Msg), n: Node, s: ^Text_Area_State, typed: stri
 @(private)
 rich_key :: proc(ui: ^Ui($Msg), n: Node, s: ^Text_Area_State, key: Key, mods: Mods) -> bool {
 	t := &ui.tree
-	ctrl, shift := .Ctrl in mods, .Shift in mods
+	ctrl, shift, alt := .Ctrl in mods, .Shift in mods, .Alt in mods
 	lo, hi := pos_order(s.caret, s.anchor)
 	meta := block_meta(s.doc, lo.block)
 	listy := meta.kind == .Bullet || meta.kind == .Numbered || meta.kind == .Task
 	#partial switch key {
 	case .B:
-		if !ctrl do return false
+		if !ctrl || shift || alt do return false
 		rich_act(ui, n, s, .Bold)
 		return true
 	case .I:
-		if !ctrl do return false
+		if !ctrl || shift || alt do return false
 		rich_act(ui, n, s, .Italic)
 		return true
 	case .U:
-		if !ctrl do return false
+		if !ctrl || shift || alt do return false
 		rich_act(ui, n, s, .Underline)
 		return true
 	case .E:
-		if !ctrl do return false
+		if !ctrl || shift || alt do return false
 		rich_act(ui, n, s, .Code)
 		return true
 	case .H:
-		if !ctrl || !shift do return false // Ctrl+H alone is the code editor's replace
+		if !ctrl || !shift || alt do return false // Ctrl+H alone is the code editor's replace
 		rich_act(ui, n, s, .Highlight)
 		return true
 	case .K:
-		if !ctrl do return false
+		if !ctrl || shift || alt do return false
 		rich_act(ui, n, s, .Link)
 		return true
 	case .Tab:

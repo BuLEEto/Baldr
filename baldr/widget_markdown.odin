@@ -107,7 +107,7 @@ strconv_itoa :: proc(buf: []u8, v: int) -> string {
 // live_key: the source-level shortcuts of the live editor.
 @(private)
 live_key :: proc(ui: ^Ui($Msg), n: Node, s: ^Text_Area_State, key: Key, mods: Mods) -> bool {
-	ctrl, shift := .Ctrl in mods, .Shift in mods
+	ctrl, shift, alt := .Ctrl in mods, .Shift in mods, .Alt in mods
 	lo, hi := pos_order(s.caret, s.anchor)
 	line := block_str(s.doc, lo.block)
 	in_fence := area_live_fences(s)[lo.block] // inside a code block the source is plain text
@@ -172,19 +172,19 @@ live_key :: proc(ui: ^Ui($Msg), n: Node, s: ^Text_Area_State, key: Key, mods: Mo
 		live_changed(ui, n, s)
 		return true
 	case .B:
-		if !ctrl do return false
+		if !ctrl || shift || alt do return false
 		live_wrap(ui, n, s, "**", "**")
 		return true
 	case .I:
-		if !ctrl do return false
+		if !ctrl || shift || alt do return false
 		live_wrap(ui, n, s, "*", "*")
 		return true
 	case .E:
-		if !ctrl do return false
+		if !ctrl || shift || alt do return false
 		live_wrap(ui, n, s, "`", "`")
 		return true
 	case .K:
-		if !ctrl || s.readonly do return false
+		if !ctrl || shift || alt || s.readonly do return false
 		if lo == hi {
 			w0, w1 := word_at(line, lo.off)
 			lo, hi = {lo.block, w0}, {lo.block, w1}

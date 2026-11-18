@@ -787,7 +787,7 @@ code_key :: proc(ui: ^Ui($Msg), n: Node, s: ^Text_Area_State, key: Key, mods: Mo
 		complete_open(ui, n, s, complete_word_start(s), by_key = true)
 		return true
 	case .H:
-		if !ctrl do return false
+		if !ctrl || shift || alt do return false // Ctrl+Shift+H is a window's (replace across files)
 		code_bar_open(ui, n, s, .Replace)
 		return true
 	case .Tab:
@@ -844,11 +844,11 @@ code_key :: proc(ui: ^Ui($Msg), n: Node, s: ^Text_Area_State, key: Key, mods: Mo
 		code_move_lines(ui, n, s, lo.block, hi.block if hi.off > 0 || hi.block == lo.block else hi.block - 1, -1 if key == .Up else +1)
 		return true
 	case .F:
-		if !ctrl do return false
+		if !ctrl || shift || alt do return false // Ctrl+Shift+F is a window's (search across files)
 		code_bar_open(ui, n, s, .Find)
 		return true
 	case .G:
-		if !ctrl do return false
+		if !ctrl || shift || alt do return false
 		code_bar_open(ui, n, s, .Goto)
 		return true
 	case .F3:

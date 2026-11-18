@@ -164,10 +164,11 @@ graph_keep :: proc(t: ^Tree, n: Node, nodes: []Graph_Node, wires: []Graph_Wire) 
 		}
 		kept = &t.graph_data[n]
 	}
-	for s in kept.names do delete(s, t.allocator)
-	clear(&kept.names)
-	clear(&kept.nodes)
-	clear(&kept.wires)
+	// Paint draws these strings by alias, so the same graph keeps them; a new
+	// one repaints, which makes freeing the old copies safe.
+	if had && graph_same(kept, nodes, wires) do return
+	mark_paint_dirty(t, n)
+	graph_kept_clear(t, kept)
 	own :: proc(t: ^Tree, kept: ^Graph_Kept, s: string) -> string {
 		c := strings.clone(s, t.allocator)
 		append(&kept.names, c)
@@ -185,14 +186,42 @@ graph_keep :: proc(t: ^Tree, n: Node, nodes: []Graph_Node, wires: []Graph_Wire) 
 	append(&kept.wires, ..wires)
 }
 
+// graph_same: the nodes and wires are what the graph already holds.
+@(private)
+graph_same :: proc(kept: ^Graph_Kept, nodes: []Graph_Node, wires: []Graph_Wire) -> bool {
+	if len(kept.nodes) != len(nodes) || len(kept.wires) != len(wires) do return false
+	for w, i in wires do if kept.wires[i] != w do return false
+	ports_same :: proc(a, b: []Graph_Port) -> bool {
+		if len(a) != len(b) do return false
+		for p, i in a do if p.id != b[i].id || p.name != b[i].name do return false
+		return true
+	}
+	for a, i in nodes {
+		k := kept.nodes[i]
+		if k.id != a.id || k.title != a.title || k.pos != a.pos || k.color != a.color || k.selected != a.selected || k.width != a.width do return false
+		if !ports_same(k.inputs, a.inputs) || !ports_same(k.outputs, a.outputs) do return false
+	}
+	return true
+}
+
+// graph_kept_clear lets go of everything the kept graph owns: its strings
+// and each node's ports.
+@(private)
+graph_kept_clear :: proc(t: ^Tree, kept: ^Graph_Kept) {
+	for s in kept.names do delete(s, t.allocator)
+	for node in kept.nodes {
+		delete(node.inputs, t.allocator)
+		delete(node.outputs, t.allocator)
+	}
+	clear(&kept.names)
+	clear(&kept.nodes)
+	clear(&kept.wires)
+}
+
 @(private)
 graph_free :: proc(t: ^Tree, n: Node) {
 	if kept, has := &t.graph_data[n]; has {
-		for s in kept.names do delete(s, t.allocator)
-		for node in kept.nodes {
-			delete(node.inputs, t.allocator)
-			delete(node.outputs, t.allocator)
-		}
+		graph_kept_clear(t, kept)
 		delete(kept.names)
 		delete(kept.nodes)
 		delete(kept.wires)

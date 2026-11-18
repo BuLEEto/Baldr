@@ -835,6 +835,9 @@ text_input_key :: proc(ui: ^Ui($Msg), key: Key, mods: Mods) -> bool {
 		handler_send(ui, h.on_key, Key_Press{key, mods}, n) // a list below the field: walked, its current row pinned or removed
 		return true
 	}
+	when ODIN_OS != .Darwin {
+		if window_nav(key, mods) do return false // Alt+Left …: the window's Back and Forward
+	}
 	#partial switch key {
 	case .Left:
 		to: int

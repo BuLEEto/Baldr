@@ -229,7 +229,10 @@ sweep_overlay :: proc(ui: ^Ui($Msg)) {
 		if d != nil && d.epoch != ui.epoch && .Exiting not_in d.flags {
 			if t.modal != NODE_NONE && (t.modal == c || node_parent(t, t.modal) == c) {
 				t.modal = NODE_NONE
-				if node_valid(t, ui.focus_before_modal) do set_focus(t, ui.focus_before_modal, false)
+				// unless the build that closed it put the keyboard elsewhere
+				if node_valid(t, ui.focus_before_modal) && (t.focus == NODE_NONE || overlay_child_of(t, t.focus) == c) {
+					set_focus(t, ui.focus_before_modal, false)
+				}
 				ui.focus_before_modal = NODE_NONE
 			}
 			if rule, ok := ui.dismiss[c]; ok {

@@ -2779,6 +2779,11 @@ text_area_key :: proc(ui: ^Ui($Msg), key: Key, mods: Mods) -> bool {
 	if s.code.on && code_key(ui, n, s, key, mods) do return true // indentation, comments, find … first
 	if s.live && live_key(ui, n, s, key, mods) do return true // markdown source: prefixes, marks, links
 	if s.rich && !s.live && rich_key(ui, n, s, key, mods) do return true // formatting, lists, links
+	// Alt or Super with an arrow is the window's (Back, Forward), after a code
+	// editor's Alt+Up / Down. On macOS Option+arrows cross words, so they stay.
+	when ODIN_OS != .Darwin {
+		if window_nav(key, mods) do return false
+	}
 	doc := s.doc
 	shift, ctrl := .Shift in mods, .Ctrl in mods
 	lo, hi := pos_order(s.caret, s.anchor)

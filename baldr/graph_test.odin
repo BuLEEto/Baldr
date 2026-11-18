@@ -233,4 +233,43 @@ a_graph_keeps_the_keyboards_node_on_screen :: proc(t: ^testing.T) {
 	testing.expect(t, on.y >= s.rect.y - 1 && on.y <= s.rect.y + s.rect.h)
 }
 
+// The graph draws its titles and port names by alias into a kept layer, so
+// a rebuild with the same graph must leave those strings alone, and a new
+// graph is drawn at once. Rebuilding many times leaks nothing.
+@(test)
+a_graph_rebuilt_draws_what_it_still_holds :: proc(t: ^testing.T) {
+	ui: Ui(Gr_Msg)
+	ui_init(&ui)
+	defer ui_destroy(&ui)
+	g: Gr
+	make_graph(&g)
+	set_viewport(&ui.tree, {800, 500})
+	drawn_from_kept :: proc(tr: ^Tree, n: Node, title: string) -> (found, ok: bool) {
+		kept := &tr.graph_data[n]
+		ok = true
+		for c in draw_list(tr) {
+			dt, is_text := c.(Draw_Text)
+			if !is_text || dt.str != title do continue
+			found = true
+			mine := false
+			for k in kept.names do if raw_data(k) == raw_data(dt.str) do mine = true
+			if !mine do ok = false
+		}
+		return
+	}
+	n := build(&ui, &g)
+	for i in 0 ..< 4 {
+		for &node in g.nodes do node.title = strings.clone(node.title, context.temp_allocator) // equal, in new memory
+		build(&ui, &g)
+		found, ok := drawn_from_kept(&ui.tree, n, "Amplifier")
+		testing.expectf(t, found && ok, "build %d: the title is drawn from a string the graph holds", i)
+	}
+	g.nodes[1].title = "Mixer"
+	build(&ui, &g)
+	found, ok := drawn_from_kept(&ui.tree, n, "Mixer")
+	testing.expect(t, found && ok, "a new title is drawn at once, from the graph's new copy")
+	found, _ = drawn_from_kept(&ui.tree, n, "Amplifier")
+	testing.expect(t, !found, "and the old one is gone")
+}
+
 } // when ODIN_TEST

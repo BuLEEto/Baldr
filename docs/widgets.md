@@ -1042,7 +1042,10 @@ up in `outputs()` first.
 
 `chart(ui, series, kind = .Line)` draws `[]Chart_Series` as a line, an area,
 bars or a scatter; a series may carry its own `kind`, so bars with a line over
-them is one call. `x_labels` names the categories along the bottom, `y_min` /
+them is one call. `x_labels` names the categories along the bottom, label
+i at x = i. Bars stand on their x, so a missing category is a gap and series
+of different lengths line up; the pointer reads the bar it is over, and with
+several series the readout names it. `y_min` /
 `y_max` pin the value axis where the data alone would mislead, and
 `on_select` hears the point a reader picked — by pointer or by key — as a
 `Chart_Hit`. `x_min` / `x_max` pin the bottom axis too, for a history shown

@@ -23,6 +23,7 @@ package baldr
 
 import "core:fmt"
 import "core:math"
+import "core:slice"
 import "core:strings"
 
 // Chart_Kind is the shape a series takes. A chart can mix them — bars with a
@@ -56,7 +57,7 @@ Chart_Hit :: struct {
 	series: int,
 	index:  int,
 	point:  Chart_Point,
-	name:   string, // the series' name, for the message that wants to say it
+	name:   string, // the series' name, for the message that wants to say it: the chart's copy, valid while the message is handled
 }
 
 @(private) CHART_PAD_L      :: f32(52) // room for the value axis' labels
@@ -92,6 +93,7 @@ Chart_State :: struct {
 Chart_Bounds :: struct {
 	x_lo, x_hi, y_lo, y_hi: f64,
 	step:                   f64, // the value axis' tick step
+	slot:                   f64, // the width along x a category's bars share: the smallest step between bars' x (0: no bars)
 }
 
 // chart draws `series`. `kind` is what they are unless a series says
@@ -99,7 +101,8 @@ Chart_Bounds :: struct {
 // a sentence of context. `y_min` / `y_max` pin the value axis where the data
 // alone would mislead (a rate read against 0–100); left out, they come from
 // the data, rounded outwards to the tick. `x_labels` names the categories
-// along the bottom, one per point. `x_min` / `x_max` pin the bottom axis the
+// along the bottom, label i at x = i; bars stand on their x, so a missing
+// category is a gap. `x_min` / `x_max` pin the bottom axis the
 // same way, so a window of time keeps its place and a series that starts
 // partway across is drawn from where it starts. `x_grid` draws a vertical
 // line at every multiple of it along x; the lines scroll as the range moves,
@@ -178,7 +181,7 @@ chart_bounds :: proc(series: []Chart_Series, kind: Chart_Kind, y_min, y_max: May
 		b.x_lo, b.x_hi = min(b.x_lo, p.x), max(b.x_hi, p.x)
 		b.y_lo, b.y_hi = min(b.y_lo, p.y), max(b.y_hi, p.y)
 	}
-	if !any_point do b = {0, 1, 0, 1, 1}
+	if !any_point do b = {x_lo = 0, x_hi = 1, y_lo = 0, y_hi = 1, step = 1}
 	if lo, said := y_min.?; said do b.y_lo = lo
 	if hi, said := y_max.?; said do b.y_hi = hi
 	if lo, said := x_min.?; said do b.x_lo = lo
@@ -196,12 +199,37 @@ chart_bounds :: proc(series: []Chart_Series, kind: Chart_Kind, y_min, y_max: May
 			break
 		}
 	}
+	// half a slot either side, so the outer bars fit and each bar is centred
+	// on its x, under its label
+	b.slot = chart_bar_slot(series, kind)
+	if b.slot > 0 && any_point {
+		if x_min == nil do b.x_lo -= b.slot * 0.5
+		if x_max == nil do b.x_hi += b.slot * 0.5
+	}
 	if b.x_hi <= b.x_lo do b.x_hi = b.x_lo + 1
 	if b.y_hi <= b.y_lo do b.y_hi = b.y_lo + 1
 	b.step = chart_step((b.y_hi - b.y_lo) / f64(CHART_TICKS))
 	if y_min == nil do b.y_lo = math.floor(b.y_lo / b.step) * b.step
 	if y_max == nil do b.y_hi = math.ceil(b.y_hi / b.step) * b.step
 	return
+}
+
+// chart_bar_slot is the smallest distance between two different x values
+// among the bar series, 1 when they have only one; 0 when there are no
+// bars.
+@(private)
+chart_bar_slot :: proc(series: []Chart_Series, kind: Chart_Kind) -> f64 {
+	xs := make([dynamic]f64, context.temp_allocator)
+	for se in series {
+		k := kind
+		if own, said := se.kind.?; said do k = own
+		if k == .Bar do for p in se.points do append(&xs, p.x)
+	}
+	if len(xs) == 0 do return 0
+	slice.sort(xs[:])
+	gap := max(f64)
+	for i in 1 ..< len(xs) do if d := xs[i] - xs[i - 1]; d > 0 do gap = min(gap, d)
+	return 1 if gap == max(f64) else gap
 }
 
 // chart_step is the round number nearest `raw` from the 1–2–5 series, so a
@@ -293,9 +321,10 @@ chart_keep :: proc(t: ^Tree, n: Node, series: []Chart_Series, x_labels: []string
 		t.chart_data[n] = Chart_Kept{}
 		kept = &t.chart_data[n]
 	}
-	// new data is a repaint: otherwise a layer with nothing else changed
-	// keeps showing the old readings
-	if !had || !chart_same(kept, series, x_labels) do mark_paint_dirty(t, n)
+	// Paint draws these strings by alias, so the same data keeps them; new
+	// data repaints, which makes freeing the old copies safe.
+	if had && chart_same(kept, series, x_labels) do return
+	mark_paint_dirty(t, n)
 	chart_kept_clear(t, kept)
 	for se in series {
 		k := Chart_Kept_Series{name = strings.clone(se.name, t.allocator), kind = se.kind, color = se.color}
@@ -510,7 +539,9 @@ paint_chart :: proc(t: ^Tree, n: Node, d: ^Node_Data, l: ^Layer) {
 		if k, said := se.kind.?; said do kind = k
 		color := se.color if se.color != {} else palette_color(pal, si)
 		switch kind {
-		case .Bar:     chart_paint_bars(t, l, plot, b, se, si, len(kept.series), color)
+		case .Bar:
+			bar, bars := chart_bar_of(kept, s.kind, si)
+			chart_paint_bars(t, l, plot, b, se, bar, bars, color)
 		case .Line:    chart_paint_line(l, plot, b, se, color, false)
 		case .Area:    chart_paint_line(l, plot, b, se, color, true)
 		case .Scatter: chart_paint_points(l, plot, b, se, color, chart_marker(si))
@@ -527,6 +558,11 @@ paint_chart :: proc(t: ^Tree, n: Node, d: ^Node_Data, l: ^Layer) {
 		if at < len(se.points) {
 			p := se.points[at]
 			px, py := chart_x_at(plot, b, p.x), chart_y_at(plot, b, p.y)
+			if (se.kind.? or_else s.kind) == .Bar && b.slot > 0 { // on the bar being read, not between the group's
+				bar, bars := chart_bar_of(kept, s.kind, at_s)
+				left, w := chart_bar_span(plot, b, p.x, bar, bars)
+				px = left + w * 0.5
+			}
 			append(&l.cmds, Draw_Line{a = {px, plot.y}, b = {px, plot.y + plot.h}, width = 1, color = with_alpha(ink, 0.35)})
 			color := se.color if se.color != {} else palette_color(pal, at_s)
 			append(&l.cmds, Draw_Rect{rect = {px - 5, py - 5, 10, 10}, radius = 5, color = th.color.surface, border_w = 2, border = color})
@@ -613,20 +649,39 @@ fill_under :: proc(l: ^Layer, pts: [][2]f32, base: f32, color: Color) {
 }
 
 @(private)
-chart_paint_bars :: proc(t: ^Tree, l: ^Layer, plot: Rect, b: Chart_Bounds, se: Chart_Kept_Series, si, series_n: int, color: Color) {
-	if len(se.points) == 0 do return
-	slot := plot.w / f32(max(len(se.points), 1))
-	w := max((slot - CHART_BAR_GAP * 2) / f32(max(series_n, 1)), 1)
+chart_paint_bars :: proc(t: ^Tree, l: ^Layer, plot: Rect, b: Chart_Bounds, se: Chart_Kept_Series, bar, bars: int, color: Color) {
+	if len(se.points) == 0 || b.slot <= 0 do return
 	base := chart_y_at(plot, b, clamp(0, b.y_lo, b.y_hi))
-	for p, i in se.points {
-		x := plot.x + slot * f32(i) + CHART_BAR_GAP + w * f32(si)
+	for p in se.points {
+		x, w := chart_bar_span(plot, b, p.x, bar, bars)
 		y := chart_y_at(plot, b, p.y)
 		top, h := min(y, base), abs(base - y)
 		// 4 px rounded at the data end, square at the baseline: the end that
 		// carries the value is the end that is shaped
-		append(&l.cmds, Draw_Rect{rect = {x, top, max(w - CHART_BAR_GAP, 1), max(h, 1)}, radius = 4, color = color,
+		append(&l.cmds, Draw_Rect{rect = {x, top, w, max(h, 1)}, radius = 4, color = color,
 			square = {.Bottom_Left, .Bottom_Right} if p.y >= 0 else {.Top_Left, .Top_Right}})
 	}
+}
+
+// chart_bar_of is which of the chart's bar series `si` is, and how many
+// there are: they share each category's slot, side by side.
+@(private)
+chart_bar_of :: proc(kept: ^Chart_Kept, kind: Chart_Kind, si: int) -> (bar, bars: int) {
+	for se, i in kept.series {
+		if (se.kind.? or_else kind) != .Bar do continue
+		if i < si do bar += 1
+		bars += 1
+	}
+	return
+}
+
+// chart_bar_span is a bar's left edge and width: the `bar`-th of `bars` in
+// the slot at `x`. Paint, the pointer and the marker all use it.
+@(private)
+chart_bar_span :: proc(plot: Rect, b: Chart_Bounds, x: f64, bar, bars: int) -> (left, w: f32) {
+	slot := f32(b.slot / (b.x_hi - b.x_lo)) * plot.w
+	each := max((slot - CHART_BAR_GAP * 2) / f32(max(bars, 1)), 1)
+	return chart_x_at(plot, b, x) - slot * 0.5 + CHART_BAR_GAP + each * f32(bar), max(each - CHART_BAR_GAP, 1)
 }
 
 @(private)
@@ -665,7 +720,11 @@ chart_readout_set :: proc(t: ^Tree, n: Node, s: ^Chart_State) {
 		se := kept.series[at_s]
 		if at < len(se.points) {
 			p := se.points[at]
-			text = fmt.tprintf("%s  %s", chart_x_text(t, n, at, p.x), chart_tick_text(t, p.y, s.bounds.step))
+			if len(kept.series) > 1 { // which of them is being read
+				text = fmt.tprintf("%s · %s %s", chart_x_text(t, n, at, p.x), se.name, chart_tick_text(t, p.y, s.bounds.step))
+			} else {
+				text = fmt.tprintf("%s  %s", chart_x_text(t, n, at, p.x), chart_tick_text(t, p.y, s.bounds.step))
+			}
 		}
 	}
 	if text == s.readout do return
@@ -674,9 +733,10 @@ chart_readout_set :: proc(t: ^Tree, n: Node, s: ^Chart_State) {
 	mark_paint_dirty(t, n)
 }
 
-// chart_at finds the point nearest `pos`: the column for a line, area or bar
-// chart (where x is what the reader is aiming at), the nearest mark for a
-// scatter (where both axes are). Returns the series and the index, or -1.
+// chart_at finds the point nearest `pos`: the column for a line or area
+// (where x is what the reader is aiming at), the bar under the pointer for
+// bars (a group's bars share a column), the nearest mark for a scatter
+// (where both axes are). Returns the series and the index, or -1.
 @(private)
 chart_at :: proc(t: ^Tree, n: Node, pos: [2]f32) -> (series: int, index: int) {
 	s, has := &t.charts[n]
@@ -687,9 +747,14 @@ chart_at :: proc(t: ^Tree, n: Node, pos: [2]f32) -> (series: int, index: int) {
 	for se, si in kept.series {
 		kind := s.kind
 		if k, said := se.kind.?; said do kind = k
+		bar, bars := chart_bar_of(kept, s.kind, si)
 		for p, i in se.points {
 			x := chart_x_at(plot, b, p.x)
 			d := abs(pos.x - x)
+			if kind == .Bar && b.slot > 0 { // a group's bars share a column: the one under the pointer, by its own span
+				left, w := chart_bar_span(plot, b, p.x, bar, bars)
+				d = max(left - pos.x, pos.x - (left + w), 0)
+			}
 			if kind == .Scatter { // both axes matter: the nearest mark, not the nearest column
 				y := chart_y_at(plot, b, p.y)
 				d = math.sqrt((pos.x - x) * (pos.x - x) + (pos.y - y) * (pos.y - y))

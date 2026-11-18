@@ -129,9 +129,23 @@ focus_on_click_set :: proc(t: ^Tree, d: ^Node_Data, on: bool) {
 }
 
 // set_focus moves focus to `n` (or clears it with NODE_NONE). `visible`
-// says whether the ring should show. Returns true when anything changed.
+// says whether the ring should show. Returns true when anything changed. An
+// editor's builder node stands for its text. A node that cannot take the
+// keyboard is refused, and BALDR_DEBUG_EVENTS says so.
 set_focus :: proc(t: ^Tree, n: Node, visible: bool) -> (changed: bool) {
-	if n != NODE_NONE && !focusable(t, n) do return false
+	n := n
+	if a, is_frame := t.area_of_frame[n]; is_frame do n = a
+	if n != NODE_NONE && !focusable(t, n) {
+		if t.debug_events {
+			d := node_get(t, n)
+			if d == nil {
+				fmt.eprintfln("baldr/events: focus refused: node %v is gone", n)
+			} else {
+				fmt.eprintfln("baldr/events: focus refused: node %v (%v %q, built at %s) cannot take the keyboard", n, d.access.role, d.access.name, loc_text(d.loc))
+			}
+		}
+		return false
+	}
 	if t.focus != n {
 		if old := node_get(t, t.focus); old != nil {
 			old.flags -= {.Focused}
