@@ -94,8 +94,11 @@ code_state_destroy :: proc(t: ^Tree, c: ^Code_State) {
 	c^ = {}
 }
 
+// `on_word_click` hears Ctrl+click (Cmd+click on macOS) on an identifier,
+// with the caret moved there first: go to its definition. While the key is
+// held, the word under the pointer is underlined and the pointer is a hand.
 code_editor :: proc(ui: ^Ui($Msg), doc: ^Document, language: ^Language = nil, on_change: Handler(Msg, int) = nil,
-	on_context: Handler(Msg, Editor_Context) = nil, label: string = "Code", width: f32 = 0, height: f32 = 0, flex: f32 = 0, disabled := false, focus := false, tag: u64 = 0, key: u64 = 0,
+	on_context: Handler(Msg, Editor_Context) = nil, on_word_click: Handler(Msg, Pos) = nil, label: string = "Code", width: f32 = 0, height: f32 = 0, flex: f32 = 0, disabled := false, focus := false, tag: u64 = 0, key: u64 = 0,
 	loc := #caller_location) -> Node {
 	t := &ui.tree
 	th := &t.theme
@@ -112,6 +115,12 @@ code_editor :: proc(ui: ^Ui($Msg), doc: ^Document, language: ^Language = nil, on
 	if t.area_of_frame[frame] != area do ask_rebuild(ui) // first build: the bar was wired before the area existed
 	t.area_of_frame[frame] = area
 	s = &t.areas[area]
+	if handler_live(on_word_click) {
+		ui.word_clicks[area] = on_word_click
+	} else {
+		delete_key(&ui.word_clicks, area)
+		s.word_hl = {}
+	}
 	c := &s.code
 	if !c.on {
 		c.on = true

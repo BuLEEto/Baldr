@@ -388,6 +388,7 @@ cursor_for :: proc(ui: ^Ui($Msg)) -> Cursor {
 	if c, has := pointer_area_cursor(ui); has do return c // a picture's hand, or none in a slideshow
 	if c, has := md_view_cursor(ui); has do return c // a markdown view: a hand on a link, an I-beam on its words
 	if c, has := styled_cursor(ui); has do return c // …and the same pair over a styled paragraph
+	if c, has := area_word_cursor(ui); has do return c // a code editor's word, with Ctrl held: a hand
 	d := node_get(&ui.tree, ui.pointer.hover)
 	if d == nil do return .Default
 	if d.access.role == .Text_Input || d.access.role == .Spin_Button do return .Text

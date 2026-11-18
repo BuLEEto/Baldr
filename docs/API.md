@@ -4118,9 +4118,11 @@ Code_State: the code editor's extras on a Text_Area_State.
 
 ```odin
 code_editor :: proc(ui: ^Ui($Msg), doc: ^Document, language: ^Language = nil, on_change: Handler(Msg, int) = nil,
-	on_context: Handler(Msg, Editor_Context) = nil, label: string = "Code", width: f32 = 0, height: f32 = 0, flex: f32 = 0, disabled := false, focus := false, tag: u64 = 0, key: u64 = 0,
+	on_context: Handler(Msg, Editor_Context) = nil, on_word_click: Handler(Msg, Pos) = nil, label: string = "Code", width: f32 = 0, height: f32 = 0, flex: f32 = 0, disabled := false, focus := false, tag: u64 = 0, key: u64 = 0,
 	loc := #caller_location) -> Node
 ```
+
+`on_word_click` hears Ctrl+click (Cmd+click on macOS) on an identifier, with the caret moved there first: go to its definition. While the key is held, the word under the pointer is underlined and the pointer is a hand.
 
 ### `code_bar_key`
 
@@ -8348,7 +8350,7 @@ files_later_release gives a reference back; the last one frees it.
 
 Completion in an editor: a list under the caret, driven by the keys that drive every list in Baldr — Up / Down pick, Enter or Tab accept, Escape closes, a click accepts — and a List named "Completions" for assistive technology.
 
-Two ways in. A `code_editor` opens it on an identifier as it is typed (or on Ctrl+Space), which is what a completer for a language wants. Any editor can be given a **trigger** character instead: type it at the start of a word and the list opens on what follows, which is how a message box offers `@` mentions. The app supplies the candidates either way.
+Two ways in. A `code_editor` opens it on an identifier as it is typed (or on Ctrl+Space), which is what a completer for a language wants. Any editor can be given a **trigger** character instead: type it at the start of a word and the list opens on what follows, which is how a message box offers `@` mentions. The app supplies the candidates either way: from a `Completer` that answers at once, or by `on_ask`, answered later with `editor_completions` (a language server, a lookup over the network).
 
 ### `Completion`
 
@@ -8369,13 +8371,36 @@ Completer :: #type proc(doc: ^Document, at: Pos, prefix: string, lang: ^Language
 
 Completer supplies candidates for the `prefix` typed at `at` — the identifier before the caret, or what follows a trigger character (temp-allocated strings are fine: the editor copies what it keeps). `lang` is the code editor's language, nil in a plain editor. nil on a code editor means the built-in one: the language's words and the identifiers already in the document.
 
+### `Complete_Ask`
+
+```odin
+Complete_Ask :: struct {
+	caret, from: Pos,
+	prefix:      string,
+	by_key:      bool,
+	trigger:     rune,
+	gen:         u64,
+}
+```
+
+Complete_Ask is what an editor with `on_ask` sends where it would call a completer: complete the text from `from` to `caret`, which is `prefix` (temp memory, valid while the message is handled). `by_key` is Ctrl+Space; `trigger` is the `open_on` character just typed, 0 otherwise. Answer with `editor_completions` and this `gen`.
+
 ### `editor_complete`
 
 ```odin
-editor_complete :: proc(ui: ^Ui($Msg), n: Node, complete: Completer, trigger: rune = 0)
+editor_complete :: proc(ui: ^Ui($Msg), n: Node, complete: Completer = nil, trigger: rune = 0,
+	on_ask: Handler(Msg, Complete_Ask) = nil, open_on := "")
 ```
 
-editor_complete gives an editor its completion source (see `Completer`). On a `code_editor` without one the editor offers the language's words and the identifiers nearby, opening on COMPLETE_MIN identifier characters or Ctrl+Space.  `trigger` opens the list on one character instead, for prose: `editor_complete(ui, ed, files, trigger = '@')` on a `text_area` opens it when `@` is typed at the start of a word, asks the completer again on every keystroke with what follows as the prefix, and closes on a space, Escape, the caret leaving the word or the keyboard leaving the editor. Accepting replaces the trigger and the query with `insert`. While the list is open Enter and Tab accept without reaching `on_submit`, and Escape closes the list and nothing else. Stays until changed.
+editor_complete gives an editor its completion source (see `Completer`). On a `code_editor` without one the editor offers the language's words and the identifiers nearby, opening on COMPLETE_MIN identifier characters or Ctrl+Space.  `trigger` opens the list on one character instead, for prose: `editor_complete(ui, ed, files, trigger = '@')` on a `text_area` opens it when `@` is typed at the start of a word, asks the completer again on every keystroke with what follows as the prefix, and closes on a space, Escape, the caret leaving the word or the keyboard leaving the editor. Accepting replaces the trigger and the query with `insert`. While the list is open Enter and Tab accept without reaching `on_submit`, and Escape closes the list and nothing else. Stays until changed.  `on_ask` is for candidates that come later: the editor sends a `Complete_Ask` instead of calling a completer, again on each keystroke while the list is open or an ask is unanswered, and shows what the app passes to `editor_completions`. `open_on` lists characters that open the list as soon as they are typed (`"."` for a member).
+
+### `editor_completions`
+
+```odin
+editor_completions :: proc(ui: ^Ui($Msg), n: Node, gen: u64, items: []Completion)
+```
+
+editor_completions answers ask `gen` of an editor with `on_ask`. Pass it every build while you hold the answer, like marks; a stale answer is dropped, an empty one closes the list, and the editor copies what it keeps.
 
 ## emoji.odin
 

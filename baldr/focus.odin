@@ -108,7 +108,21 @@ focus_from_pointer :: proc(t: ^Tree, n: Node) {
 	if take != NODE_NONE {
 		if d := node_get(t, take); d != nil && .Keys_Only_Focus in d.flags do return
 	}
+	if take == NODE_NONE do take = editor_part_of(t, n) // a completion row: the keys stay in its editor
 	set_focus(t, take, false) // pointer focus never shows the ring
+}
+
+// editor_part_of is the editor whose popup part (a completion row, or the
+// text inside one) `n` is, NODE_NONE for anything else.
+@(private)
+editor_part_of :: proc(t: ^Tree, n: Node) -> Node {
+	for cur := n; cur != NODE_NONE; {
+		if area, is_part := t.editor_ctl_of[cur]; is_part do return area
+		d := node_get(t, cur)
+		if d == nil do break
+		cur = d.parent
+	}
+	return NODE_NONE
 }
 
 // focus_on_click_set says whether a press focuses `d`. False is GTK's

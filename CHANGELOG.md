@@ -10,6 +10,11 @@ version may break the API; every break is listed here.
 - `italic` on `text` and `button_options`.
 - `muted` on `tree_item`: muted ink, otherwise an ordinary row.
 - `tag` on `open_files`, `save_file` and `split`, returned as the `Ev`'s tag.
+- Completion that answers later: `editor_complete(on_ask, open_on)` sends a
+  `Complete_Ask`, and `editor_completions` passes the answer back. Stale
+  answers are dropped; the last one narrows as you type.
+- `on_word_click` on `code_editor`: Ctrl+click (Cmd+click on macOS) on a
+  word, with the word underlined while the key is held.
 - The caret follows the desktop's blink settings (GNOME, Windows):
   `A11y_Prefs` gains `steady_caret`, `caret_blink_ms` and
   `caret_blink_timeout_ms`.
@@ -20,6 +25,7 @@ version may break the API; every break is listed here.
   steady under reduced motion. A blink repaints only the caret.
 - A file dialog's `Ev.tag` is the command's `tag` (0 by default), where it
   was an internal token.
+- On macOS a rich editor's link follows on Cmd+click, as well as Ctrl+click.
 - Chart bars are placed by their x, not their index: a missing category
   leaves a gap, series of different lengths line up, and labels sit under
   their bars.
@@ -31,6 +37,8 @@ version may break the API; every break is listed here.
   nodes changed, and leaked its ports on every build.
 - With several bar series, the pointer reads the bar it is over, not always
   the first; the readout names the series.
+- A click on a completion row puts it in, as Enter does; it closed the list
+  and took the keyboard out of the editor.
 - A closing modal dialog no longer takes focus back from where the app put
   it.
 - `set_focus` on an editor's builder node focuses its text, where it did

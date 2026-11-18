@@ -186,6 +186,7 @@ Text_Area_State :: struct {
 	typed_since_frame: bool, // a typed character already did its reveal this frame; the rest of the run coalesces
 	code:         Code_State, // the code editor's extras (widget_code.odin); `on` = this is one
 	complete:     Complete_State, // its completion list, if it has been given a source (editor_complete.odin)
+	word_hl:      Word_Hl, // the word a follow-click would take, underlined while the modifier is held
 	rich:         bool,       // rich text: block kinds and runs shape the layout (widget_rich.odin)
 	rich_cache:   map[int]Rich_Cached, // per-block rich layouts, valid for (version, wrap_w)
 	rich_state:   Rich_State, // the rich editor's extras
@@ -2371,6 +2372,18 @@ paint_text_area :: proc(t: ^Tree, n: Node, d: ^Node_Data, l: ^Layer) {
 		}
 		if s.code.on do code_paint_over(t, n, d, s, l, inner, text_x, off, focused && !disabled)
 	}
+	if hl := s.word_hl; hl.on && s.doc != nil && hl.block < len(s.doc.blocks) {
+		la, _, xa := caret_line(t, s, {hl.block, hl.lo})
+		lb, _, xb := caret_line(t, s, {hl.block, hl.hi})
+		if la == lb { // a word wrapped across lines is left alone
+			lh := area_line_h(t, s, hl.block)
+			y := inner.y - off + block_text_top(t, s, hl.block) + f32(la + 1) * lh - 3 // where a link's underline sits
+			x := text_x + block_indent(t, s, hl.block)
+			ink := t.theme.color.accent_text
+			ink.a *= t.paint_opacity
+			append(&l.cmds, Draw_Rect{rect = {x + xa, y, xb - xa, 1}, color = ink})
+		}
+	}
 	if focused && !disabled && s.doc != nil {
 		line, _, cx := caret_line(t, s, s.caret)
 		clh := area_line_h(t, s, s.caret.block)
@@ -3018,6 +3031,60 @@ area_at :: proc(ui: ^Ui($Msg), pos: [2]f32) -> (n: Node, d: ^Node_Data, s: ^Text
 	return
 }
 
+// follow_click: the modifier that makes a click follow what it is on (a
+// link, a word's definition) rather than place the caret: Ctrl, or Command
+// on macOS.
+@(private)
+follow_click :: proc "contextless" (mods: Mods) -> bool {
+	when ODIN_OS == .Darwin do if .Super in mods do return true
+	return .Ctrl in mods
+}
+
+// ident_at is the identifier around byte `off` of `str`, empty when there
+// is none.
+@(private)
+ident_at :: proc(str: string, off: int) -> (lo, hi: int) {
+	lo, hi = clamp(off, 0, len(str)), clamp(off, 0, len(str))
+	for lo > 0 && is_ident_char(str[lo - 1]) do lo -= 1
+	for hi < len(str) && is_ident_char(str[hi]) do hi += 1
+	return
+}
+
+// Word_Hl is a word a follow-click would take: `block`, bytes `lo` to `hi`.
+@(private)
+Word_Hl :: struct {
+	on:            bool,
+	block, lo, hi: int,
+}
+
+// area_word_hover underlines the word under the pointer that a follow-click
+// would take, while the modifier is held, and clears it everywhere else.
+@(private)
+area_word_hover :: proc(ui: ^Ui($Msg), pos: [2]f32) {
+	t := &ui.tree
+	want_n, want := NODE_NONE, Word_Hl{}
+	if n, d, s, ok := area_at(ui, pos); ok && !s.dragging && follow_click(ui.pointer.mods) {
+		if _, has := ui.word_clicks[n]; has {
+			p := area_hit(t, n, d, s, pos)
+			if lo, hi := ident_at(block_str(s.doc, p.block), p.off); lo < hi do want_n, want = n, {true, p.block, lo, hi}
+		}
+	}
+	for n, &s in t.areas {
+		now := want if n == want_n else Word_Hl{}
+		if s.word_hl == now do continue
+		s.word_hl = now
+		mark_paint_dirty(t, n)
+	}
+}
+
+// area_word_cursor is the hand over a word a follow-click would take.
+@(private)
+area_word_cursor :: proc(ui: ^Ui($Msg)) -> (Cursor, bool) {
+	s := &ui.tree.areas[ui.pointer.hover]
+	if s == nil || !s.word_hl.on do return .Default, false
+	return .Pointer, true
+}
+
 // area_hit maps a window position to a document position.
 @(private)
 area_hit :: proc(t: ^Tree, n: Node, d: ^Node_Data, s: ^Text_Area_State, pos: [2]f32) -> Pos {
@@ -3117,6 +3184,15 @@ text_area_pointer_button :: proc(ui: ^Ui($Msg), pressed: bool, pos: [2]f32) -> b
 	complete_close(ui, s) // a press places the caret: the list goes
 	if s.rich && !s.live && rich_press(ui, n, d, s, pos) do return true // a task's checkbox, a link
 	if s.live && live_press(ui, n, d, s, pos) do return true
+	if h, has := ui.word_clicks[n]; has && follow_click(ui.pointer.mods) {
+		p := area_hit(t, n, d, s, pos)
+		if lo, hi := ident_at(block_str(s.doc, p.block), p.off); lo < hi {
+			s.caret, s.anchor, s.goal_x = p, p, -1
+			area_touch(t, n, s)
+			handler_send(ui, h, p, n)
+			return true
+		}
+	}
 	// The click's own time, not the frame clock, so a busy app does not need
 	// a faster double-click than an idle one.
 	click_ms := ui.pointer.time_ms
@@ -3158,6 +3234,7 @@ text_area_pointer_button :: proc(ui: ^Ui($Msg), pressed: bool, pos: [2]f32) -> b
 
 text_area_pointer_move :: proc(ui: ^Ui($Msg), pos: [2]f32) -> bool {
 	t := &ui.tree
+	if len(ui.word_clicks) > 0 do area_word_hover(ui, pos)
 	for n, &s in t.areas {
 		if !s.dragging do continue
 		d := node_get(t, n)

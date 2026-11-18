@@ -9,7 +9,9 @@ package baldr
 // on Ctrl+Space), which is what a completer for a language wants. Any
 // editor can be given a **trigger** character instead: type it at the start
 // of a word and the list opens on what follows, which is how a message box
-// offers `@` mentions. The app supplies the candidates either way.
+// offers `@` mentions. The app supplies the candidates either way: from a
+// `Completer` that answers at once, or by `on_ask`, answered later with
+// `editor_completions` (a language server, a lookup over the network).
 
 import "base:runtime"
 import "core:strings"
@@ -32,6 +34,19 @@ Completion :: struct {
 // identifiers already in the document.
 Completer :: #type proc(doc: ^Document, at: Pos, prefix: string, lang: ^Language, out: ^[dynamic]Completion)
 
+// Complete_Ask is what an editor with `on_ask` sends where it would call a
+// completer: complete the text from `from` to `caret`, which is `prefix`
+// (temp memory, valid while the message is handled). `by_key` is Ctrl+Space;
+// `trigger` is the `open_on` character just typed, 0 otherwise. Answer with
+// `editor_completions` and this `gen`.
+Complete_Ask :: struct {
+	caret, from: Pos,
+	prefix:      string,
+	by_key:      bool,
+	trigger:     rune,
+	gen:         u64,
+}
+
 COMPLETE_MAX :: 8 // rows shown
 COMPLETE_MIN :: 2 // identifier characters that open the list while typing (a trigger opens it at once)
 
@@ -44,11 +59,18 @@ COMPLETE_ITEM_TAG :: u64(100) // a candidate row's tag: this + its index (under 
 @(private)
 Complete_State :: struct {
 	completer: Completer,
-	trigger:   rune, // 0: identifiers as they are typed; otherwise the one character that opens it
+	trigger:   rune,   // 0: identifiers as they are typed; otherwise the one character that opens it
+	open_on:   string, // characters that open it at once, with nothing typed yet (tree allocator)
 	open:      bool,
-	items:     [dynamic]Completion, // the candidates shown (strings owned, tree allocator)
+	answer:    [dynamic]Completion, // the candidates as given (strings owned, tree allocator)
+	items:     [dynamic]Completion, // those shown: the answer, narrowed to what is typed (aliases into it)
 	sel:       int,                 // the highlighted candidate
 	from:      Pos,
+	forced:    bool, // opened by Ctrl+Space or an open_on character: no minimum length
+	// answering later: the latest ask, the answer shown, the first ask for
+	// the word being completed, and whether an ask is still unanswered
+	gen, answer_gen, from_gen: u64,
+	waiting:   bool,
 }
 
 // editor_complete gives an editor its completion source (see `Completer`).
@@ -64,14 +86,105 @@ Complete_State :: struct {
 // Accepting replaces the trigger and the query with `insert`. While the
 // list is open Enter and Tab accept without reaching `on_submit`, and
 // Escape closes the list and nothing else. Stays until changed.
-editor_complete :: proc(ui: ^Ui($Msg), n: Node, complete: Completer, trigger: rune = 0) {
+//
+// `on_ask` is for candidates that come later: the editor sends a
+// `Complete_Ask` instead of calling a completer, again on each keystroke
+// while the list is open or an ask is unanswered, and shows what the app
+// passes to `editor_completions`. `open_on` lists characters that open the
+// list as soon as they are typed (`"."` for a member).
+editor_complete :: proc(ui: ^Ui($Msg), n: Node, complete: Completer = nil, trigger: rune = 0,
+	on_ask: Handler(Msg, Complete_Ask) = nil, open_on := "") {
 	t := &ui.tree
 	area := n
 	if a, has := t.area_of_frame[n]; has do area = a
-	if s := &t.areas[area]; s != nil {
-		if s.complete.open && (s.complete.completer != complete || s.complete.trigger != trigger) do complete_close(ui, s)
-		s.complete.completer, s.complete.trigger = complete, trigger
+	s := &t.areas[area]
+	if s == nil do return
+	c := &s.complete
+	_, was_async := ui.complete_asks[area]
+	async := handler_live(on_ask)
+	if c.completer != complete || c.trigger != trigger || async != was_async do complete_close(ui, s)
+	c.completer, c.trigger = complete, trigger
+	if async { ui.complete_asks[area] = on_ask } else { delete_key(&ui.complete_asks, area) }
+	if c.open_on != open_on {
+		if len(c.open_on) > 0 do delete(c.open_on, t.allocator)
+		c.open_on = strings.clone(open_on, t.allocator) if len(open_on) > 0 else ""
 	}
+}
+
+// editor_completions answers ask `gen` of an editor with `on_ask`. Pass it
+// every build while you hold the answer, like marks; a stale answer is
+// dropped, an empty one closes the list, and the editor copies what it keeps.
+editor_completions :: proc(ui: ^Ui($Msg), n: Node, gen: u64, items: []Completion) {
+	t := &ui.tree
+	area := n
+	if a, has := t.area_of_frame[n]; has do area = a
+	s := &t.areas[area]
+	if s == nil do return
+	c := &s.complete
+	if gen <= c.answer_gen || gen > c.gen || gen < c.from_gen do return // shown already, never asked, or for another word
+	if !c.waiting && !c.open do return // closed since it was asked
+	complete_take(&ui.tree, c, items)
+	c.answer_gen = gen
+	query, ok := complete_query(s)
+	if !ok {
+		complete_close(ui, s)
+		return
+	}
+	if gen == c.gen { // for what is typed now: shown as the app gave it
+		c.waiting = false
+		clear(&c.items)
+		append(&c.items, ..c.answer[:])
+		c.sel = 0
+		was := c.open
+		c.open = len(c.items) > 0
+		if c.open || was do ask_rebuild(ui)
+		return
+	}
+	complete_filter(ui, s, query)
+}
+
+// complete_take replaces the answer with a copy of `found`, in the tree's
+// memory.
+@(private)
+complete_take :: proc(t: ^Tree, c: ^Complete_State, found: []Completion) {
+	complete_items_clear(t, c)
+	for f in found {
+		if len(f.label) == 0 do continue
+		append(&c.answer, Completion{
+			label = strings.clone(f.label, t.allocator),
+			insert = strings.clone(f.insert, t.allocator) if len(f.insert) > 0 else "",
+			detail = strings.clone(f.detail, t.allocator) if len(f.detail) > 0 else "",
+			kind = f.kind,
+		})
+	}
+}
+
+// complete_filter shows an older answer's candidates that match `query`
+// while a newer one is on its way: its characters in order, ignoring case.
+// Ranked as typed, then any case, then containing it, then the rest, each
+// in the answer's order, so what was typed leads.
+@(private)
+complete_filter :: proc(ui: ^Ui($Msg), s: ^Text_Area_State, query: string) {
+	c := &s.complete
+	clear(&c.items)
+	lower :: proc "contextless" (b: u8) -> u8 { return b + 32 if b >= 'A' && b <= 'Z' else b }
+	rank :: proc(label, query: string) -> int { // 0 best, 4 no match
+		if strings.has_prefix(label, query) do return 0
+		folded :: proc(a, b: string) -> bool {
+			for i in 0 ..< len(b) do if lower(a[i]) != lower(b[i]) do return false
+			return true
+		}
+		if len(label) >= len(query) && folded(label, query) do return 1
+		for at in 1 ..< max(len(label) - len(query) + 1, 1) do if folded(label[at:], query) do return 2
+		i := 0
+		for j := 0; j < len(label) && i < len(query); j += 1 do if lower(label[j]) == lower(query[i]) do i += 1
+		return 3 if i == len(query) else 4
+	}
+	for tier in 0 ..< 4 do for it in c.answer do if rank(it.label, query) == tier do append(&c.items, it)
+	c.sel = 0
+	was := c.open
+	c.open = len(c.items) > 0
+	if c.open || was do ask_rebuild(ui)
 }
 
 // complete_trigger_len is how many bytes the trigger takes (0 without one).
@@ -107,18 +220,21 @@ complete_word_start :: proc(s: ^Text_Area_State) -> Pos {
 
 @(private)
 complete_items_clear :: proc(t: ^Tree, c: ^Complete_State) {
-	for it in c.items {
+	for it in c.answer {
 		delete(it.label, t.allocator)
 		if len(it.insert) > 0 do delete(it.insert, t.allocator)
 		if len(it.detail) > 0 do delete(it.detail, t.allocator)
 	}
+	clear(&c.answer)
 	clear(&c.items)
 }
 
 @(private)
 complete_state_destroy :: proc(t: ^Tree, c: ^Complete_State) {
 	complete_items_clear(t, c)
+	delete(c.answer)
 	delete(c.items)
+	if len(c.open_on) > 0 do delete(c.open_on, t.allocator)
 	c^ = {}
 }
 
@@ -129,7 +245,15 @@ complete_state_destroy :: proc(t: ^Tree, c: ^Complete_State) {
 @(private)
 complete_after_type :: proc(ui: ^Ui($Msg), n: Node, s: ^Text_Area_State, typed: string) {
 	c := &s.complete
-	if c.completer == nil && !s.code.on do return
+	_, async := ui.complete_asks[n]
+	if c.completer == nil && !s.code.on && !async do return
+	if len(c.open_on) > 0 && utf8.rune_count_in_string(typed) == 1 { // a member's `.`: the list at once, on nothing typed yet
+		r, _ := utf8.decode_rune_in_string(typed)
+		if strings.contains_rune(c.open_on, r) {
+			complete_open(ui, n, s, s.caret, by_key = false, opened_by = r)
+			return
+		}
+	}
 	if c.trigger != 0 {
 		r, _ := utf8.decode_rune_in_string(typed)
 		// One keystroke of the trigger at a word start opens it. A paste
@@ -143,7 +267,7 @@ complete_after_type :: proc(ui: ^Ui($Msg), n: Node, s: ^Text_Area_State, typed: 
 				return
 			}
 		}
-		if !c.open do return
+		if !c.open && !c.waiting do return
 		if len(typed) > 0 && (typed[0] == ' ' || typed[0] == '\t' || typed[0] == '\n') { // a space with nothing picked
 			complete_close(ui, s)
 			return
@@ -153,30 +277,45 @@ complete_after_type :: proc(ui: ^Ui($Msg), n: Node, s: ^Text_Area_State, typed: 
 	}
 	ident := len(typed) > 0 && is_ident_char(typed[0])
 	if !ident {
-		if c.open do complete_close(ui, s)
+		complete_close(ui, s)
 		return
 	}
 	from := complete_word_start(s)
-	if c.open || s.caret.off - from.off >= COMPLETE_MIN do complete_open(ui, n, s, from, by_key = false)
+	if c.open || c.waiting || s.caret.off - from.off >= COMPLETE_MIN do complete_open(ui, n, s, from, by_key = false)
 }
 
 // complete_open gathers the candidates for the query that starts at `from`
 // and shows them; nothing to show closes the list. `by_key` is Ctrl+Space,
-// which opens it with no prefix at all.
+// which opens it with no prefix at all, as does an `open_on` character
+// (`opened_by`). With `on_ask`, the app is asked instead, and the last
+// answer stays shown, narrowed to the query, until its answer comes.
 @(private)
-complete_open :: proc(ui: ^Ui($Msg), n: Node, s: ^Text_Area_State, from: Pos, by_key: bool) {
+complete_open :: proc(ui: ^Ui($Msg), n: Node, s: ^Text_Area_State, from: Pos, by_key: bool, opened_by: rune = 0) {
 	t := &ui.tree
 	c := &s.complete
 	if s.readonly || s.doc == nil do return
-	if c.items == nil do c.items = make([dynamic]Completion, t.allocator) // the candidates it keeps are the tree's, not a frame's
+	if c.items == nil { // the candidates it keeps are the tree's, not a frame's
+		c.items = make([dynamic]Completion, t.allocator)
+		c.answer = make([dynamic]Completion, t.allocator)
+	}
+	if from != c.from || !(c.open || c.waiting) do c.from_gen = c.gen + 1 // a new word: answers to earlier asks are not for it
 	c.from = from
+	if by_key || opened_by != 0 do c.forced = true
 	query, ok := complete_query(s)
 	if !ok {
 		complete_close(ui, s)
 		return
 	}
-	if !by_key && c.trigger == 0 && len(query) < COMPLETE_MIN {
+	if !c.forced && c.trigger == 0 && len(query) < COMPLETE_MIN {
 		complete_close(ui, s)
+		return
+	}
+	if h, async := ui.complete_asks[n]; async {
+		c.gen += 1
+		c.waiting = true
+		handler_send(ui, h, Complete_Ask{caret = s.caret, from = from, prefix = strings.clone(query, context.temp_allocator),
+			by_key = by_key, trigger = opened_by, gen = c.gen}, n)
+		complete_filter(ui, s, query)
 		return
 	}
 	found := make([dynamic]Completion, context.temp_allocator)
@@ -185,16 +324,8 @@ complete_open :: proc(ui: ^Ui($Msg), n: Node, s: ^Text_Area_State, from: Pos, by
 	} else {
 		default_completer(s.doc, s.caret, query, s.code.lang, &found)
 	}
-	complete_items_clear(t, c)
-	for f in found {
-		if len(f.label) == 0 do continue
-		append(&c.items, Completion{
-			label = strings.clone(f.label, t.allocator),
-			insert = strings.clone(f.insert, t.allocator) if len(f.insert) > 0 else "",
-			detail = strings.clone(f.detail, t.allocator) if len(f.detail) > 0 else "",
-			kind = f.kind,
-		})
-	}
+	complete_take(t, c, found[:])
+	append(&c.items, ..c.answer[:])
 	c.sel = 0
 	was := c.open
 	c.open = len(c.items) > 0
@@ -204,6 +335,7 @@ complete_open :: proc(ui: ^Ui($Msg), n: Node, s: ^Text_Area_State, from: Pos, by
 @(private)
 complete_close :: proc(ui: ^Ui($Msg), s: ^Text_Area_State) {
 	c := &s.complete
+	c.waiting, c.forced = false, false
 	if !c.open do return
 	c.open = false
 	complete_items_clear(&ui.tree, c)
@@ -240,7 +372,13 @@ complete_accept :: proc(ui: ^Ui($Msg), n: Node, s: ^Text_Area_State, i: int) {
 // the app.
 @(private)
 complete_key :: proc(ui: ^Ui($Msg), n: Node, s: ^Text_Area_State, key: Key, mods: Mods) -> bool {
-	if !s.complete.open do return false
+	if !s.complete.open {
+		#partial switch key { // an answer still to come is for a list nobody wants now, or a word the caret is leaving
+		case .Escape, .Enter, .Tab, .Up, .Down, .Left, .Right, .Home, .End, .Page_Up, .Page_Down:
+			if s.complete.waiting do complete_close(ui, s)
+		}
+		return false
+	}
 	#partial switch key {
 	case .Up:     complete_move(ui, s, -1); return true
 	case .Down:   complete_move(ui, s, +1); return true
@@ -276,7 +414,7 @@ complete_click :: proc(ui: ^Ui($Msg), n: Node) -> bool {
 @(private)
 complete_tick :: proc(ui: ^Ui($Msg)) {
 	for n, &s in ui.tree.areas {
-		if s.complete.open && ui.tree.focus != n do complete_close(ui, &s)
+		if (s.complete.open || s.complete.waiting) && ui.tree.focus != n do complete_close(ui, &s)
 	}
 }
 
@@ -296,6 +434,7 @@ complete_build :: proc(ui: ^Ui($Msg), area: Node, s: ^Text_Area_State, loc: runt
 	pd := node_get(t, pop)
 	pd.access.role = .List
 	set_name(t, pop, "Completions")
+	t.editor_ctl_of[pop] = area // a press anywhere on it keeps the keys in the editor
 	// at the caret's line, under it, backed up to the start of what is being
 	// replaced where the cells are all one width (a code editor's mono face)
 	line, _, x := caret_line(t, s, s.caret)

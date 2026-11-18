@@ -713,7 +713,7 @@ rich_press :: proc(ui: ^Ui($Msg), n: Node, d: ^Node_Data, s: ^Text_Area_State, p
 		rich_changed(ui, n, s)
 		return true
 	}
-	if .Ctrl in ui.pointer.mods {
+	if follow_click(ui.pointer.mods) {
 		p := area_hit(t, n, d, s, pos)
 		if href := href_at(s.doc, p); len(href) > 0 {
 			if h, has := ui.on_link[n]; has do handler_send(ui, h, href, n)

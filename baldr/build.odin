@@ -127,6 +127,8 @@ Ui :: struct($Msg: typeid) {
 	context_pos: [2]f32,                     // where the latest context request happened (context_menu opens there)
 	context_clicks: map[Node]Msg,            // buttons: what a right-click or the Menu key sends (context_pos recorded first)
 	editor_contexts: map[Node]Handler(Msg, Editor_Context), // editors (by area): a right-click or the Menu key in the text
+	complete_asks:   map[Node]Handler(Msg, Complete_Ask),   // editors (by area) whose completion answers later (editor_complete.odin)
+	word_clicks:     map[Node]Handler(Msg, Pos),            // code editors (by area): Ctrl+click on a word
 	paste_others:    map[Node]Handler(Msg, Paste_Other),    // editors and fields: a paste that brought no text, but a picture or files
 	md_links:        map[Node]Handler(Msg, string),         // markdown views: a link the person pressed, by its target
 	md_images:       map[Node]Handler(Msg, string),         // …and a picture in a reply, by its src: the app opens it its own way
@@ -257,6 +259,8 @@ ui_init :: proc(ui: ^Ui($Msg), allocator := context.allocator) {
 	ui.on_context = make(map[Node]Handler(Msg, int), allocator)
 	ui.context_clicks = make(map[Node]Msg, allocator)
 	ui.editor_contexts = make(map[Node]Handler(Msg, Editor_Context), allocator)
+	ui.complete_asks = make(map[Node]Handler(Msg, Complete_Ask), allocator)
+	ui.word_clicks = make(map[Node]Handler(Msg, Pos), allocator)
 	ui.paste_others = make(map[Node]Handler(Msg, Paste_Other), allocator)
 	ui.md_links = make(map[Node]Handler(Msg, string), allocator)
 	ui.md_images = make(map[Node]Handler(Msg, string), allocator)
@@ -350,6 +354,8 @@ ui_destroy :: proc(ui: ^Ui($Msg)) {
 	delete(ui.on_context)
 	delete(ui.context_clicks)
 	delete(ui.editor_contexts)
+	delete(ui.complete_asks)
+	delete(ui.word_clicks)
 	delete(ui.paste_others)
 	delete(ui.md_links)
 	delete(ui.md_images)
@@ -817,6 +823,8 @@ forget_subtree :: proc(ui: ^Ui($Msg), n: Node) {
 	delete_key(&ui.on_context, n)
 	delete_key(&ui.context_clicks, n)
 	delete_key(&ui.editor_contexts, n)
+	delete_key(&ui.complete_asks, n)
+	delete_key(&ui.word_clicks, n)
 	delete_key(&ui.paste_others, n)
 	delete_key(&ui.md_links, n)
 	delete_key(&ui.md_images, n)
