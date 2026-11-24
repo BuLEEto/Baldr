@@ -18,7 +18,8 @@ package baldr
 // breaks the line instead). `on_context` (every editor has it) is sent
 // on a right-click or the Menu key with an Editor_Context: where in the
 // Document, and where to open the menu; editor_action does what the
-// menu's Cut, Copy, Paste, Select All, Undo and Redo ask. `max_length` caps the characters (typing and
+// menu's Cut, Copy, Paste, Select All, Undo and Redo ask, here and in a
+// field, a styled_text or a markdown_view given one. `max_length` caps the characters (typing and
 // pasting stop at the limit), `readonly` allows navigation, selection and
 // copy but no edits, `invalid` / `required` colour the border and set the
 // accessibility states, `wrap = false` keeps each paragraph on one line and
@@ -997,13 +998,16 @@ editor_view :: proc(t: ^Tree, n: Node) -> (top: Pos, ok: bool) {
 	return Pos{b, off}, true
 }
 
-// Editor_Context is what an editor's `on_context` carries: the
+// Editor_Context is what a text widget's `on_context` carries: the
 // Document position a right-click landed on (the caret, for the Menu key or
 // Shift+F10), whether that is inside the selection, and where to open the
 // menu, in window coordinates: under the pointer, or under the caret.
 // Ui.context_pos is set to `at` first, so context_menu opens there. A
-// right-click outside the selection has already moved the caret to `pos`;
-// inside it the selection stays, for Cut and Copy.
+// right-click outside the selection has already moved the caret to `pos`
+// (in read-only text, dropped the selection); inside it the selection
+// stays, for Cut and Copy. A field, a `styled_text` and a `markdown_view`
+// have no blocks, so `pos.block` is 0 and `pos.off` a byte of the field's
+// value, the paragraph's text or the document's source.
 Editor_Context :: struct {
 	pos:          Pos,
 	in_selection: bool,
@@ -1020,28 +1024,47 @@ Editor_Action :: enum u8 {
 // editor can do now.
 Editor_Actions :: bit_set[Editor_Action; u8]
 
-// editor_action does `action` in the editor built as `n` (its frame or the
-// area) exactly as its shortcut does: the same clipboard, the same undo
-// steps, the caret and the view following. Focus stays where it is. False
-// when there was nothing to do: no selection to cut or copy, no text on the
-// clipboard, no step to undo or redo, an empty Document to select, a
-// readonly editor asked to cut, paste, undo or redo, a disabled editor.
+// editor_action does `action` in the text widget built as `n` exactly as
+// its shortcut does: the same clipboard, the same undo steps, the caret and
+// the view following. `n` is an editor (its frame or the area), a
+// `text_input`, a `styled_text` or a `markdown_view`; the last two are read
+// only, so they Copy and Select All. Focus stays where it is. False when
+// there was nothing to do: no selection to cut or copy, no text on the
+// clipboard, no step to undo or redo, no text to select, a read-only widget
+// asked to cut, paste, undo or redo, a disabled one, a node that is none.
 editor_action :: proc(ui: ^Ui($Msg), n: Node, action: Editor_Action) -> bool {
-	area, s := editor_area(&ui.tree, n)
-	d := node_get(&ui.tree, area)
-	if s == nil || d == nil || .Disabled in d.flags do return false
-	return area_action(ui, area, s, action)
+	t := &ui.tree
+	if area, s := editor_area(t, n); s != nil {
+		d := node_get(t, area)
+		if d == nil || .Disabled in d.flags do return false
+		return area_action(ui, area, s, action)
+	}
+	d := node_get(t, n)
+	if d == nil || .Disabled in d.flags do return false
+	if s, is := &t.inputs[n]; is do return input_action(ui, n, d, s, action)
+	if s, is := &t.styled[n]; is do return styled_action(t, n, s, action)
+	if s, is := &t.md_views[n]; is do return md_view_action(t, n, s, action)
+	return false
 }
 
-// editor_actions is what editor_action can do in the editor built as `n`
-// now, to grey a menu's items: Cut and Copy need a selection, Paste text on
-// the clipboard, Select All some text, Undo and Redo a step to take; Cut,
-// Paste, Undo and Redo an editor that is not readonly. Empty for a disabled
-// editor or a node that is none.
+// editor_actions is what editor_action can do in the text widget built as
+// `n` now, to grey a menu's items: Cut and Copy need a selection, Paste text
+// on the clipboard, Select All some text, Undo and Redo a step to take; Cut,
+// Paste, Undo and Redo a widget that is not read-only. A password field
+// never offers Cut or Copy. Empty for a disabled widget or a node that is
+// none.
 editor_actions :: proc(t: ^Tree, n: Node) -> (can: Editor_Actions) {
 	area, s := editor_area(t, n)
+	if s == nil {
+		d := node_get(t, n)
+		if d == nil || .Disabled in d.flags do return
+		if fs, is := &t.inputs[n]; is do return input_actions(t, fs)
+		if ps, is := &t.styled[n]; is do return styled_actions(t, ps)
+		if ms, is := &t.md_views[n]; is do return md_view_actions(t, ms)
+		return
+	}
 	d := node_get(t, area)
-	if s == nil || d == nil || .Disabled in d.flags do return
+	if d == nil || .Disabled in d.flags do return
 	lo, hi := pos_order(s.caret, s.anchor)
 	if lo != hi && t.clipboard.set != nil do can += s.readonly ? {.Copy} : {.Cut, .Copy}
 	if document_end(s.doc) != (Pos{}) do can += {.Select_All}

@@ -1,6 +1,9 @@
 // 32_chat — a chat that rides its newest message: `list` with
 // `estimated_height`, `key_of` and `follow_end`, bubbles that are as wide
 // as their text, and the per-message actions as small always-visible icons.
+// A right-click on a message's text (or the Menu key, once a press has put
+// the keyboard there) opens a menu whose Copy copies what is selected,
+// through `editor_action`, and greys when nothing is.
 //
 // It is meant to be scrolled: a chat-shaped list has rows of mixed heights
 // and follows the end, so
@@ -26,7 +29,7 @@ package main
 import "core:fmt"
 import "baldr:baldr"
 
-Msg :: union { At, Newest, Act, Arrived, Tick, Play, More }
+Msg :: union { At, Newest, Act, Arrived, Tick, Play, More, Menu, Menu_Closed, Clip }
 
 At      :: struct { at: baldr.List_At }
 Newest  :: struct {}
@@ -35,6 +38,9 @@ Arrived :: struct {} // the timer: someone sent something
 Tick    :: struct {} // …and the quarter-second that moves a voice note along
 Play    :: struct { msg: int }
 More    :: struct {} // the sentinel at the top: load older messages
+Menu    :: struct { node: baldr.Node, msg: int } // a right-click on a message's text: which paragraph, which message
+Menu_Closed :: struct {}
+Clip    :: struct { action: baldr.Editor_Action }
 
 Kind :: enum { Text, Picture, Link, Voice, File, Code, Sentinel }
 
@@ -61,7 +67,13 @@ State :: struct {
 	playing:    int, // the voice note being played, or -1
 	played:     int, // …and how far into it, in quarter-seconds
 	oldest:     int, // how many older messages there are still to load
+	menu:       Menu,                       // the paragraph the text menu was asked from, and its message
+	menu_open:  bool,
+	clip:       Maybe(baldr.Editor_Action), // what it chose, done in the view; the menu's dismiss arrives first, so the paragraph outlives it
 }
+
+// on_text_menu: the paragraph is the event's node, the message its tag.
+on_text_menu :: proc(e: baldr.Ev(baldr.Editor_Context)) -> Msg { return Menu{e.node, int(e.tag)} }
 
 SENDERS := []string{"me", "George", "Ada", "Nik"}
 
@@ -169,7 +181,7 @@ body_of :: proc(s: ^State, ui: ^baldr.Ui(Msg), i: int) {
 	th := &ui.tree.theme
 	switch r.kind {
 	case .Text, .Sentinel:
-		baldr.styled_text(ui, r.body, nil, key = 1)
+		baldr.styled_text(ui, r.body, nil, on_context = on_text_menu, tag = u64(i), key = 1)
 
 	case .Picture:
 		// Placeholder, then picture: 220x140 of nothing until it decodes,
@@ -183,7 +195,7 @@ body_of :: proc(s: ^State, ui: ^baldr.Ui(Msg), i: int) {
 		if r.body != "" do baldr.text(ui, r.body, role = .Caption, max_width = 220, key = 2)
 
 	case .Link:
-		baldr.styled_text(ui, r.body, nil, key = 1)
+		baldr.styled_text(ui, r.body, nil, on_context = on_text_menu, tag = u64(i), key = 1)
 		{
 			// A preview card whose og:image lands later: title and
 			// description first, the picture when it arrives.
@@ -231,7 +243,7 @@ body_of :: proc(s: ^State, ui: ^baldr.Ui(Msg), i: int) {
 			// One Code run over the whole body: the app says "this is code", the
 			// toolkit draws it in the mono family.
 			runs := []baldr.Run{{end = len(r.body), attrs = {.Code}}}
-			baldr.styled_text(ui, r.body, runs, key = 2)
+			baldr.styled_text(ui, r.body, runs, on_context = on_text_menu, tag = u64(i), key = 2)
 		}
 	}
 }
@@ -342,6 +354,22 @@ view :: proc(s: ^State, ui: ^baldr.Ui(Msg)) {
 			}
 		}
 	}
+	if a, chose := s.clip.?; chose {
+		baldr.editor_action(ui, s.menu.node, a)
+		s.clip = nil
+	}
+	if s.menu_open {
+		m := s.menu
+		can := baldr.editor_actions(&ui.tree, m.node) // Copy greys with nothing selected: it never copies the whole message unasked
+		if baldr.context_menu(ui, true, Msg(Menu_Closed{})) {
+			defer baldr.end(ui)
+			baldr.menu_item(ui, "Copy", Msg(Clip{.Copy}), shortcut = "Ctrl+C", icon = .Copy, disabled = .Copy not_in can)
+			baldr.menu_item(ui, "Select All", Msg(Clip{.Select_All}), shortcut = "Ctrl+A", disabled = .Select_All not_in can)
+			baldr.separator(ui)
+			baldr.menu_item(ui, "Copy Message", Msg(Act{"Copy", m.msg}))
+			baldr.menu_item(ui, "Reply", Msg(Act{"Reply", m.msg}), icon = .Reply)
+		}
+	}
 	// Up from the bottom: say so, and offer the way back. Revealing the
 	// last row means "to the end, and follow", and stays that even if a
 	// message arrives before it lands.
@@ -406,6 +434,12 @@ main :: proc() {
 				return baldr.reveal_key(Msg, 1, msg_key(nil, len(s.rows) - 1))
 			case Act:
 				s.did = fmt.bprintf(s.did_buf[:], "%s on message %d", v.what, v.msg + 1)
+			case Menu:
+				s.menu, s.menu_open = v, true
+			case Menu_Closed:
+				s.menu_open = false
+			case Clip:
+				s.clip = v.action // the view does it, holding the paragraph
 			case Play:
 				s.playing, s.played = (-1 if s.playing == v.msg else v.msg), 0
 			case More:

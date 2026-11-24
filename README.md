@@ -183,7 +183,7 @@ needs nothing installed to lay out text.
 | **Audio** | playback and capture of PCM on PulseAudio, WASAPI and CoreAudio. No codecs: an app decodes Opus, MP3 or FLAC with its own library and hands over the samples |
 | **Untrusted input** | pictures, pastes, drops, links, notifications and other programs' messages are bounded and checked — see [the guide](docs/guide.md#untrusted-input) for what is promised |
 | **Async** | commands from `update` (jobs on threads, delays, file IO, clipboard), subscriptions (timers, file watches) |
-| **Testing** | layout, reconcile, paint and accessibility all run headless — 1,623 tests across 9 packages, no GPU or window needed |
+| **Testing** | layout, reconcile, paint and accessibility all run headless — 1,630 tests across 9 packages, no GPU or window needed |
 | **Speed** | measured on a Ryzen 9 7900 with a Radeon RX 7600, optimised build, CPU and GPU together: the gallery's first frame 55 ms after launch; a click that changes one control 0.3 ms; a switch to another page 1.4 ms; a typed key 0.4 ms; a spinner animating 0.2 ms a frame; and an idle window draws nothing at all |
 | **Footprint** | a hello world is 14 MB built optimised (13.7 MB with `-o:size`): 3.5 MB of it is the embedded fonts and most of the rest Unicode, emoji and icon tables, so text and icons work on a machine with nothing installed. An idle window uses no CPU: nothing is drawn until something changes |
 
@@ -401,7 +401,7 @@ the front page than leave you to work it out from a commit log.
 What I would ask you to judge it by is not who typed it, but what stands in
 for "a human was careful here":
 
-- **A claim in this repo is a measurement.** 1,623 headless tests run with
+- **A claim in this repo is a measurement.** 1,630 headless tests run with
   no GPU and no window, and every view they build is checked to draw only
   inside the area a repaint of it clears; the gate fails on a drawing
   outside it and on any leaked byte; `./build.sh check` type-checks every package for

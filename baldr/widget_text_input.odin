@@ -47,6 +47,7 @@ Text_Input_State :: struct {
 	quiet:          bool,    // draws no frame of its own: whatever holds it draws the chrome (a search_field)
 	search:         bool,    // a search_field's input: Escape clears it before it goes anywhere else
 	paste_prefer:   Paste_Prefer, // which wins when the clipboard offers a picture and text
+	paste_other:    bool,    // the app takes a paste that brought a picture or files, so a menu offers Paste for one
 	// Undo and redo: what the field held before each step, coalesced so a
 	// typed word is one step. Never for a password: a history of a secret is
 	// a copy of it.
@@ -235,6 +236,7 @@ text_input :: proc(ui: ^Ui($Msg), value: ^Text, placeholder: string = "", on_cha
 	input_refresh(t, n, d, s)
 	ui.input_handlers[n] = Text_Handlers(Msg){on_change = on_change, on_submit = on_submit, on_cancel = on_cancel, on_key = on_key}
 	if handler_live(on_paste_other) { ui.paste_others[n] = on_paste_other } else { delete_key(&ui.paste_others, n) }
+	s.paste_other = handler_live(on_paste_other)
 	return n
 }
 
@@ -806,6 +808,66 @@ input_copy :: proc(t: ^Tree, s: ^Text_Input_State) -> bool {
 	return t.clipboard.set(t.clipboard.user, input_src(s)[lo:hi])
 }
 
+// input_paste is Ctrl+V: the clipboard's text over the selection, or a
+// picture or files handed to the app. False when nothing came of it.
+@(private)
+input_paste :: proc(ui: ^Ui($Msg), n: Node, d: ^Node_Data, s: ^Text_Input_State) -> bool {
+	t := &ui.tree
+	// A field that prefers pictures takes the picture over the text a
+	// browser puts beside it, and inserts nothing.
+	if s.paste_prefer == .Picture && paste_other_send(ui, n, picture_only = true) do return true
+	if t.clipboard.get == nil do return false
+	pasted, got := t.clipboard.get(t.clipboard.user, context.temp_allocator)
+	if !got do return paste_other_send(ui, n)
+	clean := sanitize_input(pasted)
+	if len(clean) > 0 do input_replace(ui, n, d, s, s.anchor, s.caret, clean)
+	if s.password { // the pasted passphrase's scratch copies
+		if raw_data(clean) != raw_data(pasted) do mem.zero(raw_data(clean), len(clean))
+		mem.zero(raw_data(pasted), len(pasted))
+	}
+	return len(clean) > 0 || paste_other_send(ui, n) // a picture or files: the app's to take
+}
+
+// input_action is an Editor_Action in a field, as its shortcut does it.
+@(private)
+input_action :: proc(ui: ^Ui($Msg), n: Node, d: ^Node_Data, s: ^Text_Input_State, action: Editor_Action) -> bool {
+	input_fit(s)
+	lo, hi := min(s.caret, s.anchor), max(s.caret, s.anchor)
+	switch action {
+	case .Cut:
+		if !input_copy(&ui.tree, s) do return false
+		input_replace(ui, n, d, s, lo, hi, "")
+	case .Copy:
+		return input_copy(&ui.tree, s)
+	case .Paste:
+		return input_paste(ui, n, d, s)
+	case .Select_All:
+		if len(input_src(s)) == 0 do return false
+		s.anchor, s.caret = 0, len(input_src(s))
+		input_touch(&ui.tree, n, s)
+	case .Undo:
+		return input_undo_apply(ui, n, d, s, &s.undo, &s.redo)
+	case .Redo:
+		return input_undo_apply(ui, n, d, s, &s.redo, &s.undo)
+	}
+	return true
+}
+
+// input_actions is what input_action can do in a field now.
+@(private)
+input_actions :: proc(t: ^Tree, s: ^Text_Input_State) -> (can: Editor_Actions) {
+	lo, hi := min(s.caret, s.anchor), max(s.caret, s.anchor)
+	src := input_src(s)
+	if lo != hi && hi <= len(src) && !s.password && t.clipboard.set != nil do can += {.Cut, .Copy}
+	if len(src) > 0 do can += {.Select_All}
+	if s.value == nil do return
+	if clipboard_has_text(t) do can += {.Paste}
+	else if s.paste_other { if _, any := clip_other(t); any do can += {.Paste} } // a picture or files the app takes
+	if !s.password && len(s.undo) > 0 do can += {.Undo}
+	if !s.password && len(s.redo) > 0 do can += {.Redo}
+	return
+}
+
 // text_event commits typed text (platform Ev_Text) into the focused field:
 // it replaces the selection, or inserts at the caret. Control characters are
 // dropped. Returns true when anything changed.
@@ -893,21 +955,8 @@ text_input_key :: proc(ui: ^Ui($Msg), key: Key, mods: Mods) -> bool {
 		if !ctrl do return false
 		return input_undo_apply(ui, n, d, s, &s.redo, &s.undo)
 	case .V:
-		// A field that prefers pictures takes the picture over the text a
-		// browser puts beside it, and inserts nothing.
-		if ctrl && s.paste_prefer == .Picture && paste_other_send(ui, n, picture_only = true) do return true
-		if ctrl && t.clipboard.get != nil {
-			empty := true
-			if pasted, got := t.clipboard.get(t.clipboard.user, context.temp_allocator); got {
-				clean := sanitize_input(pasted)
-				if len(clean) > 0 { input_replace(ui, n, d, s, lo, hi, clean); empty = false }
-				if s.password { // the pasted passphrase's scratch copies
-					if raw_data(clean) != raw_data(pasted) do mem.zero(raw_data(clean), len(clean))
-					mem.zero(raw_data(pasted), len(pasted))
-				}
-			}
-			if empty do return paste_other_send(ui, n) // a picture or files: the app's to take
-		}
+		// a paste that found nothing to take goes on to the window
+		if ctrl && !input_paste(ui, n, d, s) && t.clipboard.get != nil do return false
 	case .Enter:
 		h, has := ui.input_handlers[n]
 		// A modified Enter the window bound is the window's, with or without
@@ -1101,6 +1150,25 @@ input_context_press :: proc(ui: ^Ui($Msg), pos: [2]f32) -> bool {
 	if !inside do input_move(t, n, s, at, extend = false)
 	ui.context_pos = pos
 	return handler_send(ui, h, Editor_Context{pos = {0, at}, in_selection = inside, at = pos}, n)
+}
+
+// input_context_key: the Menu key (or Shift+F10) in a field with
+// `on_context` asks for the menu at the caret, opening under the field.
+@(private)
+input_context_key :: proc(ui: ^Ui($Msg), n: Node) -> bool {
+	t := &ui.tree
+	h, has := ui.editor_contexts[n]
+	if !has do return false
+	d := node_get(t, n)
+	s, is := &t.inputs[n]
+	if d == nil || !is || .Disabled in d.flags do return false
+	if _, is_input := d.kind.(Text_Input_Kind); !is_input do return false
+	input_fit(s)
+	caret := input_caret_rect(t, n, d, s)
+	at := [2]f32{caret.x, d.abs.y + d.abs.h}
+	lo, hi := min(s.caret, s.anchor), max(s.caret, s.anchor)
+	ui.context_pos = at
+	return handler_send(ui, h, Editor_Context{pos = {0, s.caret}, in_selection = lo != hi, at = at}, n)
 }
 
 // ------------------------------------------------------------ undo

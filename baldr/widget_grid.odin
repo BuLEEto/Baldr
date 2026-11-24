@@ -123,7 +123,8 @@ grid_column_at :: proc(ui: ^Ui($Msg), view: Node) -> int {
 // ------------------------------------------------------------ context
 
 // context_press handles a right-click: in an editor with on_context it
-// sends the Document position (area_context_press); on an item it selects
+// sends the Document position (area_context_press), and in a field, a
+// styled_text or a markdown_view given one, the same; on an item it selects
 // it first if it was not selected (a multi-selection is kept) and sends
 // `on_context` with its index; on a table's or icon view's background it
 // sends -1. The position is remembered for context_menu.
@@ -132,6 +133,8 @@ context_press :: proc(ui: ^Ui($Msg), pos: [2]f32) -> bool {
 	t := &ui.tree
 	if area_context_press(ui, pos) do return true // an editor with on_context: the caret moves there unless it is on the selection
 	if input_context_press(ui, pos) do return true // …and a field given one, the same way
+	if styled_context_press(ui, pos) do return true // …and read-only text: its selection kept for Copy
+	if md_view_context_press(ui, pos) do return true
 	hit := hit_test(t, pos)
 	target := interactive_target(ui, hit)
 	if ref, ok := ui.rows[target]; ok {
@@ -178,7 +181,8 @@ context_send :: proc(ui: ^Ui($Msg), view: Node, index: int, pos: [2]f32) -> bool
 }
 
 // context_key is the keyboard form (Menu key, Shift+F10): a focused
-// editor's on_context at its caret, or a focused button's context message,
+// editor's, field's or read-only text's on_context at its caret or
+// selection, or a focused button's context message,
 // its menu opening under it; else the focused grid's cursor item, at the item's position (or the view's top-left corner).
 @(private)
 context_key :: proc(ui: ^Ui($Msg)) -> bool {
@@ -186,6 +190,9 @@ context_key :: proc(ui: ^Ui($Msg)) -> bool {
 	view := t.focus
 	if view != NODE_NONE do set_focus(t, view, true) // the keyboard is in use: the ring shows, and a menu this opens starts highlighted
 	if area_context_key(ui, view) do return true // an editor with on_context: at the caret
+	if input_context_key(ui, view) do return true
+	if styled_context_key(ui, view) do return true
+	if md_view_context_key(ui, view) do return true
 	if m, has := ui.context_clicks[view]; has {
 		d := node_get(t, view)
 		if d == nil || .Disabled in d.flags do return false

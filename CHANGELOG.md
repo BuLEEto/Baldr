@@ -21,6 +21,13 @@ version may break the API; every break is listed here.
 - The caret follows the desktop's blink settings (GNOME, Windows):
   `A11y_Prefs` gains `steady_caret`, `caret_blink_ms` and
   `caret_blink_timeout_ms`.
+- `on_context` on `styled_text` and on `md_view_options`: a right-click or
+  the Menu key in read-only text sends an `Editor_Context`, as in an
+  editor. A right-click on the selection keeps it; elsewhere it drops it.
+  `styled_text` also takes `tag`.
+- `editor_action` and `editor_actions` take a `text_input`, a `styled_text`
+  or a `markdown_view` as well as an editor, so one menu's Cut, Copy, Paste,
+  Select All, Undo and Redo work in all of them.
 
 ### Changed
 
@@ -49,6 +56,8 @@ version may break the API; every break is listed here.
   the first; the readout names the series.
 - With a code editor's find bar open, typing in the code moved the
   keyboard to the find field and the caret to a match.
+- A field given `on_context` heard a right-click but not the Menu key or
+  Shift+F10.
 - A click on a completion row puts it in, as Enter does; it closed the list
   and took the keyboard out of the editor.
 - A closing modal dialog no longer takes focus back from where the app put

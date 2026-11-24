@@ -903,16 +903,10 @@ md_view_key :: proc(ui: ^Ui($Msg), key: Key, mods: Mods) -> bool {
 	#partial switch key {
 	case .A:
 		if .Ctrl not_in mods do return false
-		md_view_selection_clear_others(t, n)
-		s.sel_a, s.sel_b = 0, len(s.md.src)
-		mark_paint_dirty(t, n)
-		return true
+		return md_view_action(t, n, s, .Select_All)
 	case .C:
 		if .Ctrl not_in mods do return false
-		lo, hi := md_view_selection(t, n)
-		if lo >= hi || t.clipboard.set == nil do return false
-		t.clipboard.set(t.clipboard.user, md_view_selected_text(t, n))
-		return true
+		return md_view_action(t, n, s, .Copy)
 	case .Escape:
 		if s.sel_a == s.sel_b do return false
 		s.sel_a, s.sel_b = 0, 0
@@ -941,6 +935,90 @@ md_view_key :: proc(ui: ^Ui($Msg), key: Key, mods: Mods) -> bool {
 		return true
 	}
 	return false
+}
+
+// md_view_action is an Editor_Action in a reply: Copy and Select All, the
+// two a read-only text has.
+@(private)
+md_view_action :: proc(t: ^Tree, n: Node, s: ^Md_View_State, action: Editor_Action) -> bool {
+	if s.md == nil do return false
+	#partial switch action {
+	case .Copy:
+		lo, hi := md_view_selection(t, n)
+		if lo >= hi || t.clipboard.set == nil do return false
+		return t.clipboard.set(t.clipboard.user, md_view_selected_text(t, n))
+	case .Select_All:
+		if len(s.md.src) == 0 do return false
+		md_view_selection_clear_others(t, n)
+		s.sel_a, s.sel_b = 0, len(s.md.src)
+		mark_paint_dirty(t, n)
+		return true
+	}
+	return false
+}
+
+@(private)
+md_view_actions :: proc(t: ^Tree, s: ^Md_View_State) -> (can: Editor_Actions) {
+	if s.md == nil do return
+	if s.sel_a != s.sel_b && t.clipboard.set != nil do can += {.Copy}
+	if len(s.md.src) > 0 do can += {.Select_All}
+	return
+}
+
+// md_view_context_press: a right-click in a reply with `on_context` keeps a
+// selection it lands on and drops one it misses, then asks for the menu
+// there. A code block's Copy button is the button's.
+@(private)
+md_view_context_press :: proc(ui: ^Ui($Msg), pos: [2]f32) -> bool {
+	t := &ui.tree
+	n := hit_test(t, pos)
+	for n != NODE_NONE {
+		if _, is_copy := t.md_copy_of[n]; is_copy do return false
+		if _, is := t.md_views[n]; is do break
+		d := node_get(t, n)
+		if d == nil do return false
+		n = d.parent
+	}
+	if n == NODE_NONE do return false
+	h, has := ui.editor_contexts[n]
+	s := &t.md_views[n]
+	if !has || s == nil || s.md == nil do return false
+	set_focus(t, n, false)
+	s.dragging = false
+	at := md_view_at(t, n, s, pos)
+	lo, hi := md_view_selection(t, n)
+	inside := hi > lo && at >= lo && at <= hi
+	if !inside {
+		s.sel_a, s.sel_b = at, at
+		md_view_selection_clear_others(t, n)
+		mark_paint_dirty(t, n)
+	}
+	ui.context_pos = pos
+	return handler_send(ui, h, Editor_Context{pos = {0, at}, in_selection = inside, at = pos}, n)
+}
+
+// md_view_context_key: the Menu key (or Shift+F10) in a focused reply with
+// `on_context` asks for the menu under the selection's moving end, or under
+// the reply's first line when nothing is selected.
+@(private)
+md_view_context_key :: proc(ui: ^Ui($Msg), n: Node) -> bool {
+	t := &ui.tree
+	h, has := ui.editor_contexts[n]
+	if !has do return false
+	s := &t.md_views[n]
+	d := node_get(t, n)
+	if s == nil || d == nil || s.md == nil do return false
+	lo, hi := md_view_selection(t, n)
+	at := [2]f32{d.abs.x, d.abs.y}
+	if len(s.blocks) > 0 do at += {s.blocks[0].indent, s.blocks[0].top + s.blocks[0].lay.line_h}
+	if hi > lo && len(s.blocks) > 0 {
+		bi, li, off := md_view_place(s, s.sel_b)
+		c := s.blocks[bi]
+		y := c.top + (c.lay.lines[li].y if li < len(c.lay.lines) else 0) + c.lay.line_h
+		at = {d.abs.x + c.indent + rich_x(&c.lay, li, off), d.abs.y + y}
+	}
+	ui.context_pos = at
+	return handler_send(ui, h, Editor_Context{pos = {0, s.sel_b}, in_selection = hi > lo, at = at}, n)
 }
 
 // md_view_selection_rects is the selected part of a block's lines, as the
@@ -1128,8 +1206,10 @@ md_view_link_tip :: proc(ui: ^Ui($Msg), n: Node, loc: runtime.Source_Code_Locati
 
 // md_view_options sets what a reply does beyond being read: `on_link` hears
 // a link being pressed, with its target, and the app decides whether to
-// open it (`open_url` only takes http, https and mailto). Each setting
-// stays until changed.
+// open it (`open_url` only takes http, https and mailto). `on_context` is
+// sent on a right-click or the Menu key, as a `styled_text`'s is, for a
+// `context_menu` whose Copy and Select All call `editor_action` with the
+// view. Each setting stays until changed.
 //
 // The target `on_link` and `on_image` carry is the *view's* memory, and the
 // view lets it go the next time that block is laid out — which, while a
@@ -1146,9 +1226,10 @@ md_view_link_tip :: proc(ui: ^Ui($Msg), n: Node, loc: runtime.Source_Code_Locati
 //	baldr.md_view_options(ui, reply, prose_width = 680) // in a 1,200 px view
 md_view_options :: proc(ui: ^Ui($Msg), n: Node, on_link: Handler(Msg, string) = nil,
 	on_image: Handler(Msg, string) = nil, language: proc(name: string) -> ^Language = nil,
-	prose_width: f32 = 0) {
+	prose_width: f32 = 0, on_context: Handler(Msg, Editor_Context) = nil) {
 	if handler_live(on_link) { ui.md_links[n] = on_link } else { delete_key(&ui.md_links, n) }
 	if handler_live(on_image) { ui.md_images[n] = on_image } else { delete_key(&ui.md_images, n) }
+	if handler_live(on_context) { ui.editor_contexts[n] = on_context } else { delete_key(&ui.editor_contexts, n) }
 	s := &ui.tree.md_views[n]
 	if s == nil do return
 	if s.language != language { // a different lookup may colour a fence differently

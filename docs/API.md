@@ -3800,7 +3800,7 @@ text_input_pointer_move extends the selection while a press drags inside a field
 
 ## widget_text_area.odin
 
-text_area is a multiline editor over an app-owned Document (document.odin): paragraphs wrap to the width, the area grows with its content between `min_lines` and `max_lines` (0 = unbounded) or scrolls when given a height, and everything a text field does works across lines: typing, Enter, Backspace/Delete by grapheme or word (joining blocks), arrows (Up/Down keep a goal x across wrapped lines and blocks), Home/End of the line and Ctrl+Home/End of the document, Page Up/Down, Shift selection, Ctrl+A/C/X/V, Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z undo and redo (typing groups into one entry until a pause), click / drag / double-click (word) / triple-click (paragraph). Accessibility: role Text_Input, name = `label` (else the placeholder), the contents as the value, fully keyboard-operable with the standard focus ring. Tab moves focus (a text area is not a code editor). `on_change` fires with the document version after every edit; Ctrl+Enter sends `on_submit`, or Enter itself where the app says so (`editor_options(submit = .Enter)`: a chat composer, where Shift+Enter breaks the line instead). `on_context` (every editor has it) is sent on a right-click or the Menu key with an Editor_Context: where in the Document, and where to open the menu; editor_action does what the menu's Cut, Copy, Paste, Select All, Undo and Redo ask. `max_length` caps the characters (typing and pasting stop at the limit), `readonly` allows navigation, selection and copy but no edits, `invalid` / `required` colour the border and set the accessibility states, `wrap = false` keeps each paragraph on one line and scrolls sideways (code), and `marks` are ranges to decorate: Error and Warning squiggles, an Info underline, a Highlight behind the text — the hooks a spell checker, a search or a linter needs.
+text_area is a multiline editor over an app-owned Document (document.odin): paragraphs wrap to the width, the area grows with its content between `min_lines` and `max_lines` (0 = unbounded) or scrolls when given a height, and everything a text field does works across lines: typing, Enter, Backspace/Delete by grapheme or word (joining blocks), arrows (Up/Down keep a goal x across wrapped lines and blocks), Home/End of the line and Ctrl+Home/End of the document, Page Up/Down, Shift selection, Ctrl+A/C/X/V, Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z undo and redo (typing groups into one entry until a pause), click / drag / double-click (word) / triple-click (paragraph). Accessibility: role Text_Input, name = `label` (else the placeholder), the contents as the value, fully keyboard-operable with the standard focus ring. Tab moves focus (a text area is not a code editor). `on_change` fires with the document version after every edit; Ctrl+Enter sends `on_submit`, or Enter itself where the app says so (`editor_options(submit = .Enter)`: a chat composer, where Shift+Enter breaks the line instead). `on_context` (every editor has it) is sent on a right-click or the Menu key with an Editor_Context: where in the Document, and where to open the menu; editor_action does what the menu's Cut, Copy, Paste, Select All, Undo and Redo ask, here and in a field, a styled_text or a markdown_view given one. `max_length` caps the characters (typing and pasting stop at the limit), `readonly` allows navigation, selection and copy but no edits, `invalid` / `required` colour the border and set the accessibility states, `wrap = false` keeps each paragraph on one line and scrolls sideways (code), and `marks` are ranges to decorate: Error and Warning squiggles, an Info underline, a Highlight behind the text — the hooks a spell checker, a search or a linter needs.
 
 The code editor (widget_code.odin) is the same engine in mono with `Code_State` switched on: it adds a gutter, tab stops, syntax colour, indentation keys, bracket matching, find and go-to-line — nothing here is duplicated there. Painting is virtual: only the blocks in view are shaped and drawn, from a cache of block tops kept per document version.
 
@@ -3998,7 +3998,7 @@ Editor_Context :: struct {
 }
 ```
 
-Editor_Context is what an editor's `on_context` carries: the Document position a right-click landed on (the caret, for the Menu key or Shift+F10), whether that is inside the selection, and where to open the menu, in window coordinates: under the pointer, or under the caret. Ui.context_pos is set to `at` first, so context_menu opens there. A right-click outside the selection has already moved the caret to `pos`; inside it the selection stays, for Cut and Copy.
+Editor_Context is what a text widget's `on_context` carries: the Document position a right-click landed on (the caret, for the Menu key or Shift+F10), whether that is inside the selection, and where to open the menu, in window coordinates: under the pointer, or under the caret. Ui.context_pos is set to `at` first, so context_menu opens there. A right-click outside the selection has already moved the caret to `pos` (in read-only text, dropped the selection); inside it the selection stays, for Cut and Copy. A field, a `styled_text` and a `markdown_view` have no blocks, so `pos.block` is 0 and `pos.off` a byte of the field's value, the paragraph's text or the document's source.
 
 ### `Editor_Action`
 
@@ -4024,7 +4024,7 @@ Editor_Actions is a set of Editor_Action: what editor_actions says an editor can
 editor_action :: proc(ui: ^Ui($Msg), n: Node, action: Editor_Action) -> bool
 ```
 
-editor_action does `action` in the editor built as `n` (its frame or the area) exactly as its shortcut does: the same clipboard, the same undo steps, the caret and the view following. Focus stays where it is. False when there was nothing to do: no selection to cut or copy, no text on the clipboard, no step to undo or redo, an empty Document to select, a readonly editor asked to cut, paste, undo or redo, a disabled editor.
+editor_action does `action` in the text widget built as `n` exactly as its shortcut does: the same clipboard, the same undo steps, the caret and the view following. `n` is an editor (its frame or the area), a `text_input`, a `styled_text` or a `markdown_view`; the last two are read only, so they Copy and Select All. Focus stays where it is. False when there was nothing to do: no selection to cut or copy, no text on the clipboard, no step to undo or redo, no text to select, a read-only widget asked to cut, paste, undo or redo, a disabled one, a node that is none.
 
 ### `editor_actions`
 
@@ -4032,7 +4032,7 @@ editor_action does `action` in the editor built as `n` (its frame or the area) e
 editor_actions :: proc(t: ^Tree, n: Node) -> (can: Editor_Actions)
 ```
 
-editor_actions is what editor_action can do in the editor built as `n` now, to grey a menu's items: Cut and Copy need a selection, Paste text on the clipboard, Select All some text, Undo and Redo a step to take; Cut, Paste, Undo and Redo an editor that is not readonly. Empty for a disabled editor or a node that is none.
+editor_actions is what editor_action can do in the text widget built as `n` now, to grey a menu's items: Cut and Copy need a selection, Paste text on the clipboard, Select All some text, Undo and Redo a step to take; Cut, Paste, Undo and Redo a widget that is not read-only. A password field never offers Cut or Copy. Empty for a disabled widget or a node that is none.
 
 ### `editor_marks`
 
@@ -12487,10 +12487,10 @@ md_view_link_at is the link target under `pos` (absolute), "" when there is none
 ```odin
 md_view_options :: proc(ui: ^Ui($Msg), n: Node, on_link: Handler(Msg, string) = nil,
 	on_image: Handler(Msg, string) = nil, language: proc(name: string) -> ^Language = nil,
-	prose_width: f32 = 0)
+	prose_width: f32 = 0, on_context: Handler(Msg, Editor_Context) = nil)
 ```
 
-md_view_options sets what a reply does beyond being read: `on_link` hears a link being pressed, with its target, and the app decides whether to open it (`open_url` only takes http, https and mailto). Each setting stays until changed.  The target `on_link` and `on_image` carry is the *view's* memory, and the view lets it go the next time that block is laid out — which, while a reply streams, is straight away. Open it or clone it in the same update; do not put it in the app's state as it stands.  `prose_width` caps how wide *prose* is and centres it in the view; tables, code blocks and pictures share its left edge but may run on to the view's right edge. 0 (the default) leaves everything full width. For a wide window: the table gets room, the paragraphs stay readable (45-75 characters; WCAG 1.4.8 asks for under 80). Inter at 14.5 px averages about 7 px a character, so 680 is about 95; measure your own body face.  baldr.md_view_options(ui, reply, prose_width = 680) // in a 1,200 px view
+md_view_options sets what a reply does beyond being read: `on_link` hears a link being pressed, with its target, and the app decides whether to open it (`open_url` only takes http, https and mailto). `on_context` is sent on a right-click or the Menu key, as a `styled_text`'s is, for a `context_menu` whose Copy and Select All call `editor_action` with the view. Each setting stays until changed.  The target `on_link` and `on_image` carry is the *view's* memory, and the view lets it go the next time that block is laid out — which, while a reply streams, is straight away. Open it or clone it in the same update; do not put it in the app's state as it stands.  `prose_width` caps how wide *prose* is and centres it in the view; tables, code blocks and pictures share its left edge but may run on to the view's right edge. 0 (the default) leaves everything full width. For a wide window: the table gets room, the paragraphs stay readable (45-75 characters; WCAG 1.4.8 asks for under 80). Inter at 14.5 px averages about 7 px a character, so 680 is about 95; measure your own body face.  baldr.md_view_options(ui, reply, prose_width = 680) // in a 1,200 px view
 
 ### `md_view_image`
 
@@ -12610,13 +12610,13 @@ A run is `Run` from document.odin: the byte it ends at, its `Attrs` (Bold, Itali
 
 ```odin
 styled_text :: proc(ui: ^Ui($Msg), text: string, runs: []Run = nil,
-	on_link: Handler(Msg, string) = nil, role: Text_Role = .Body, size: f32 = 0,
+	on_link: Handler(Msg, string) = nil, on_context: Handler(Msg, Editor_Context) = nil, role: Text_Role = .Body, size: f32 = 0,
 	ink: Color = {}, on: Color = {},
 	width: f32 = 0, max_width: f32 = 0, flex: f32 = 0, label: string = "",
-	key: u64 = 0, loc := #caller_location) -> Node
+	tag: u64 = 0, key: u64 = 0, loc := #caller_location) -> Node
 ```
 
-styled_text lays `text` out as one wrapped paragraph in `runs`' styles. `runs` cover the bytes in order — each up to its `end` — and an empty `runs` is plain text. Both are copied, so the app may free or rebuild them; nothing is kept beyond the call.  `on_link` is sent the run's `href` when a link run is clicked. The app decides what that means: `open_url` for an http one, something of its own for a scheme only it knows.  The text is selectable with the pointer and copies as **plain text** across runs — the styles are how it is drawn, not what it is.  runs := []baldr.Run{{end = 5, attrs = {.Bold}}, {end = 11}} baldr.styled_text(ui, "Hello world", runs)
+styled_text lays `text` out as one wrapped paragraph in `runs`' styles. `runs` cover the bytes in order — each up to its `end` — and an empty `runs` is plain text. Both are copied, so the app may free or rebuild them; nothing is kept beyond the call.  `on_link` is sent the run's `href` when a link run is clicked. The app decides what that means: `open_url` for an http one, something of its own for a scheme only it knows.  The text is selectable with the pointer and copies as **plain text** across runs — the styles are how it is drawn, not what it is.  `on_context` is sent on a right-click or the Menu key, as an editor's is, so the app can open a `context_menu` whose Copy and Select All call `editor_action` with this node. A right-click on the selection keeps it; anywhere else it drops it, so Copy greys rather than copying something the person can no longer see.  runs := []baldr.Run{{end = 5, attrs = {.Bold}}, {end = 11}} baldr.styled_text(ui, "Hello world", runs)
 
 ### `Styled_Part`
 

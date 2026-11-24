@@ -75,13 +75,19 @@ styled_runs_same :: proc(a, b: []Run) -> bool {
 // The text is selectable with the pointer and copies as **plain text**
 // across runs — the styles are how it is drawn, not what it is.
 //
+// `on_context` is sent on a right-click or the Menu key, as an editor's is,
+// so the app can open a `context_menu` whose Copy and Select All call
+// `editor_action` with this node. A right-click on the selection keeps it;
+// anywhere else it drops it, so Copy greys rather than copying something
+// the person can no longer see.
+//
 //	runs := []baldr.Run{{end = 5, attrs = {.Bold}}, {end = 11}}
 //	baldr.styled_text(ui, "Hello world", runs)
 styled_text :: proc(ui: ^Ui($Msg), text: string, runs: []Run = nil,
-	on_link: Handler(Msg, string) = nil, role: Text_Role = .Body, size: f32 = 0,
+	on_link: Handler(Msg, string) = nil, on_context: Handler(Msg, Editor_Context) = nil, role: Text_Role = .Body, size: f32 = 0,
 	ink: Color = {}, on: Color = {},
 	width: f32 = 0, max_width: f32 = 0, flex: f32 = 0, label: string = "",
-	key: u64 = 0, loc := #caller_location) -> Node {
+	tag: u64 = 0, key: u64 = 0, loc := #caller_location) -> Node {
 	n, created := reconcile_child(ui, .Custom, key, loc)
 	t := &ui.tree
 	th := &t.theme
@@ -128,6 +134,8 @@ styled_text :: proc(ui: ^Ui($Msg), text: string, runs: []Run = nil,
 	}
 
 	if handler_live(on_link) { ui.on_link[n] = on_link } else { delete_key(&ui.on_link, n) }
+	if handler_live(on_context) { ui.editor_contexts[n] = on_context } else { delete_key(&ui.editor_contexts, n) }
+	d.tag = tag // which message a menu or a link was asked from
 	set_name(t, n, label if label != "" else text)
 	d.kind = Custom_Kind{paint = styled_paint, measure = measure_styled, user = nil}
 	set_layout(t, n, Layout_Props{width = width, max_w = max_width, flex = flex})
@@ -352,21 +360,94 @@ styled_key :: proc(ui: ^Ui($Msg), key: Key, mods: Mods) -> bool {
 	s := &t.styled[t.focus]
 	if s == nil do return false
 	if shift_chord_bound(ui, key, mods) do return false // the app's own Ctrl+Shift+C / V / A wins
+	if .Ctrl not_in mods do return false
 	#partial switch key {
-	case .C:
-		if .Ctrl not_in mods do return false
+	case .C: return styled_action(t, t.focus, s, .Copy)
+	case .A: return styled_action(t, t.focus, s, .Select_All)
+	}
+	return false
+}
+
+// styled_action is an Editor_Action in a paragraph: Copy and Select All,
+// the two a read-only text has.
+@(private)
+styled_action :: proc(t: ^Tree, n: Node, s: ^Styled_State, action: Editor_Action) -> bool {
+	#partial switch action {
+	case .Copy:
 		if t.clipboard.set == nil do return false
 		got := styled_text_selected(s, context.temp_allocator)
 		if len(got) == 0 do return false
-		t.clipboard.set(t.clipboard.user, got)
-		return true
-	case .A:
-		if .Ctrl not_in mods do return false
+		return t.clipboard.set(t.clipboard.user, got)
+	case .Select_All:
+		if len(s.text) == 0 do return false
 		s.anchor, s.caret = 0, len(s.text)
-		mark_paint_dirty(t, t.focus)
+		styled_clear_others(t, n)
+		mark_paint_dirty(t, n)
 		return true
 	}
 	return false
+}
+
+@(private)
+styled_actions :: proc(t: ^Tree, s: ^Styled_State) -> (can: Editor_Actions) {
+	lo, hi := styled_sel(s)
+	if hi > lo && hi <= len(s.text) && t.clipboard.set != nil do can += {.Copy}
+	if len(s.text) > 0 do can += {.Select_All}
+	return
+}
+
+// styled_context_press: a right-click in a paragraph with `on_context`
+// keeps a selection it lands on and drops one it misses, then asks for the
+// menu there. False for a paragraph without one, so a `context_area` round
+// it still answers.
+@(private)
+styled_context_press :: proc(ui: ^Ui($Msg), pos: [2]f32) -> bool {
+	t := &ui.tree
+	n := hit_test(t, pos)
+	for n != NODE_NONE {
+		if _, is := t.styled[n]; is do break
+		d := node_get(t, n)
+		if d == nil do return false
+		n = d.parent
+	}
+	if n == NODE_NONE do return false
+	h, has := ui.editor_contexts[n]
+	s := &t.styled[n]
+	if !has || s == nil || !s.have do return false
+	set_focus(t, n, false)
+	s.dragging = false
+	at := styled_offset_at(t, n, s, pos)
+	lo, hi := styled_sel(s)
+	inside := hi > lo && at >= lo && at <= hi
+	if !inside {
+		s.anchor, s.caret = at, at
+		styled_clear_others(t, n)
+		mark_paint_dirty(t, n)
+	}
+	ui.context_pos = pos
+	return handler_send(ui, h, Editor_Context{pos = {0, at}, in_selection = inside, at = pos}, n)
+}
+
+// styled_context_key: the Menu key (or Shift+F10) in a focused paragraph
+// with `on_context` asks for the menu under the selection's moving end, or
+// under the paragraph's first line when nothing is selected.
+@(private)
+styled_context_key :: proc(ui: ^Ui($Msg), n: Node) -> bool {
+	t := &ui.tree
+	h, has := ui.editor_contexts[n]
+	if !has do return false
+	s := &t.styled[n]
+	d := node_get(t, n)
+	if s == nil || d == nil || !s.have do return false
+	lo, hi := styled_sel(s)
+	at := [2]f32{d.abs.x, d.abs.y + s.lay.line_h}
+	if hi > lo && len(s.lay.lines) > 0 {
+		li := rich_line_of(&s.lay, s.caret, len(s.text))
+		line := s.lay.lines[li]
+		at = {d.abs.x + rich_x(&s.lay, li, s.caret), d.abs.y + line.y + s.lay.line_h}
+	}
+	ui.context_pos = at
+	return handler_send(ui, h, Editor_Context{pos = {0, s.caret}, in_selection = hi > lo, at = at}, n)
 }
 
 // styled_cursor is the cursor over a styled paragraph: a hand on a link, an

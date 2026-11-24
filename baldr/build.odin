@@ -126,7 +126,7 @@ Ui :: struct($Msg: typeid) {
 	on_context: map[Node]Handler(Msg, int),  // tables / icon views: right-click or Menu key (item index, -1 = background)
 	context_pos: [2]f32,                     // where the latest context request happened (context_menu opens there)
 	context_clicks: map[Node]Msg,            // buttons: what a right-click or the Menu key sends (context_pos recorded first)
-	editor_contexts: map[Node]Handler(Msg, Editor_Context), // editors (by area): a right-click or the Menu key in the text
+	editor_contexts: map[Node]Handler(Msg, Editor_Context), // editors (by area), fields and read-only text: a right-click or the Menu key in the text
 	complete_asks:   map[Node]Handler(Msg, Complete_Ask),   // editors (by area) whose completion answers later (editor_complete.odin)
 	word_clicks:     map[Node]Handler(Msg, Pos),            // code editors (by area): Ctrl+click on a word
 	menu_leads:      [dynamic]Menu_Lead,                    // this build's menu rows, lined up at its end (menu_leads_settle)
