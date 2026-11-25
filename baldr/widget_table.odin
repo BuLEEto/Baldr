@@ -8,7 +8,11 @@ package baldr
 // moves its column to another slot (a drop indicator shows where). A
 // click on a sortable header asks the app to sort (`on_sort`; the app
 // reorders its data). With a header cell focused, Shift+Left/Right resizes
-// and Ctrl+Left/Right reorders, so nothing needs the pointer.
+// and Ctrl+Left/Right reorders, so nothing needs the pointer. Columns wider
+// together than the table scroll sideways, the header panning with the
+// rows and the vertical bar staying in view: the wheel sideways (Shift+wheel),
+// the horizontal bar, Left / Right in the body, or a header cell taking the
+// keyboard.
 //
 // Rows are selected by click, Ctrl-click, Shift-click, and the keyboard
 // cursor (Up/Down, Shift to extend, Space to toggle, Ctrl+A, Home/End,
@@ -117,6 +121,7 @@ TABLE_DIVIDER_ZONE    :: f32(5) // px either side of a header divider that grab 
 TABLE_MIN_COL         :: f32(60)
 TABLE_DOUBLE_CLICK_MS :: 400.0
 TABLE_KEY_RESIZE_STEP :: f32(8)
+TABLE_PAN_STEP        :: f32(48) // Left / Right in the body, a wheel notch
 
 @(private)
 table_state_destroy :: proc(ts: ^Table_State) {
@@ -227,6 +232,7 @@ table :: proc(ui: ^Ui($Msg), columns: []Column, count: int, selection: ^Selectio
 	hd := node_get(t, hdr)
 	if hcreated {
 		hd.access.role = .Row
+		hd.flags += {.Clips} // its cells pan with the rows, past its ends
 		set_name(t, hdr, "Header")
 	}
 	set_layout(t, hdr, Layout_Props{axis = .Stack, height = ts.header_height})
@@ -272,9 +278,12 @@ table :: proc(ui: ^Ui($Msg), columns: []Column, count: int, selection: ^Selectio
 	view_inner_begin(ui)
 	// No gap or padding whatever a list's own style says: the rubber band and
 	// table_reveal count rows from the list's top at the row pitch.
-	first, last = list(ui, ts.count, ts.row_height, gap = f32(0), padding = f32(0), flex = 1, tail_pad = ts.row_height, on_range = on_range, gutter = gutter, key = 1, loc = loc)
+	// Columns wider than the table scroll sideways, the header with them.
+	wide := ts.total_w if ts.total_w > inner_w + 0.5 else 0
+	first, last = list(ui, ts.count, ts.row_height, gap = f32(0), padding = f32(0), flex = 1, tail_pad = ts.row_height, on_range = on_range, gutter = gutter, content_width = wide, key = 1, loc = loc)
 	view_inner_end(ui)
 	ts.list = ui.scopes[len(ui.scopes) - 1].node
+	t.scroll_follow[ts.header] = ts.list
 	ui.scopes[len(ui.scopes) - 1].extra_pops = 1 // end(ui) closes the list and the table
 	node_get(t, ts.list).access.role = .None // the Table above is the accessible container
 	return
@@ -459,29 +468,40 @@ paint_table_over :: proc(t: ^Tree, n: Node, d: ^Node_Data, l: ^Layer) {
 	paint_marquee(t, ts.list, &ts.grid, l, lk.marquee)
 	hd := node_get(t, ts.header)
 	if hd == nil do return
+	x0 := table_x0(t, ts)
 	line := lk.divider
 	line.a *= t.paint_opacity
 	for slot in 0 ..< len(ts.order) - 1 {
-		x := hd.abs.x + table_divider_x(ts, slot)
+		x := x0 + table_divider_x(ts, slot)
+		if x < hd.abs.x || x > hd.abs.x + hd.abs.w do continue // panned out of sight
 		append(&l.cmds, Draw_Rect{rect = {x - lk.divider_width / 2, hd.abs.y + lk.divider_inset, lk.divider_width, hd.abs.h - 2 * lk.divider_inset}, color = line})
 	}
 	guide := ts.resize_col if ts.resize_col >= 0 else ts.hover_col
 	if guide >= 0 && guide < len(ts.order) - 1 {
-		x := hd.abs.x + table_divider_x(ts, guide)
+		x := x0 + table_divider_x(ts, guide)
 		c := lk.indicator
 		c.a *= t.paint_opacity
 		append(&l.cmds, Draw_Rect{rect = {x - 1, d.abs.y, 2, d.abs.h}, color = c})
 	}
 	if ts.drag_slot >= 0 && ts.drop_slot >= 0 {
-		x := hd.abs.x + (ts.total_w if ts.drop_slot >= len(ts.order) else ts.xs[ts.order[ts.drop_slot]])
+		x := clamp(x0 + (ts.total_w if ts.drop_slot >= len(ts.order) else ts.xs[ts.order[ts.drop_slot]]), hd.abs.x, hd.abs.x + hd.abs.w)
 		c := lk.indicator
 		c.a *= t.paint_opacity
 		append(&l.cmds, Draw_Rect{rect = {x - 1.5, d.abs.y, 3, d.abs.h}, color = c, radius = 1.5})
 		dim := lk.fill // the dragged heading fades toward the table's own fill
 		dim.a = 0.35 * t.paint_opacity
 		i := ts.order[ts.drag_slot]
-		append(&l.cmds, Draw_Rect{rect = {hd.abs.x + ts.xs[i], hd.abs.y, ts.ws[i], hd.abs.h}, color = dim})
+		append(&l.cmds, Draw_Rect{rect = rect_clip({x0 + ts.xs[i], hd.abs.y, ts.ws[i], hd.abs.h}, hd.abs), color = dim})
 	}
+}
+
+// table_x0 is where the columns start in the window: the header's left
+// edge, less how far the rows are panned sideways.
+@(private)
+table_x0 :: proc(t: ^Tree, ts: ^Table_State) -> f32 {
+	hd := node_get(t, ts.header)
+	if hd == nil do return 0
+	return hd.abs.x - scroll_offset(t, ts.list).x
 }
 
 // table_divider_x is the x (within the row) of the divider after display slot `slot`.
@@ -550,7 +570,15 @@ table_key :: proc(ui: ^Ui($Msg), key: Key, mods: Mods) -> bool {
 	}
 	tbl := t.focus
 	ts, ok := &t.tables[tbl]
-	if !ok || ts.sel == nil || ts.count == 0 do return false
+	if !ok do return false
+	if (key == .Left || key == .Right) && mods & {.Alt, .Super} == {} { // columns wider than the table: the rows pan sideways
+		ld := node_get(t, ts.list)
+		if ld == nil || .Scroll_H not_in ld.flags do return false
+		step := TABLE_PAN_STEP if key == .Right else -TABLE_PAN_STEP
+		scroll_to_smooth(t, ts.list, scroll_offset(t, ts.list) + {step, 0})
+		return true
+	}
+	if ts.sel == nil || ts.count == 0 do return false
 	sel := ts.sel
 	move :: proc(ui: ^Ui($Msg), tbl: Node, ts: ^Table_State, to: int, mods: Mods) -> bool {
 		row := clamp(to, 0, ts.count - 1)
@@ -618,7 +646,7 @@ table_divider_at :: proc(t: ^Tree, pos: [2]f32) -> (tbl: Node, slot: int) {
 		hd := node_get(t, ts.header)
 		if hd == nil || !node_within(t, hit, ts.header) do continue
 		for s in 0 ..< len(ts.order) - 1 {
-			x := hd.abs.x + table_divider_x(&ts, s)
+			x := table_x0(t, &ts) + table_divider_x(&ts, s)
 			if abs(pos.x - x) <= TABLE_DIVIDER_ZONE do return cand, s
 		}
 	}
@@ -727,8 +755,7 @@ table_move_drag :: proc(ui: ^Ui($Msg), pos: [2]f32) -> bool {
 		ui.pointer.pressed = NODE_NONE
 		ts.drag_slot = m.slot
 	}
-	hd := node_get(t, ts.header)
-	x := pos.x - hd.abs.x
+	x := pos.x - table_x0(t, ts)
 	drop := len(ts.order)
 	for s in 0 ..< len(ts.order) {
 		i := ts.order[s]

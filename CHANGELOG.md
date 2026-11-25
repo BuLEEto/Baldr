@@ -28,6 +28,13 @@ version may break the API; every break is listed here.
 - `editor_action` and `editor_actions` take a `text_input`, a `styled_text`
   or a `markdown_view` as well as an editor, so one menu's Cut, Copy, Paste,
   Select All, Undo and Redo work in all of them.
+- A table whose columns are wider together than it is scrolls sideways. The
+  header pans with the rows and the vertical bar stays in view; the wheel,
+  the horizontal bar, Left and Right in the body, and a header cell taking
+  the keyboard all reach the far columns.
+- `angle` on the painter's `draw_text`, for a chart's axis labels: text
+  turned about where it starts. Off a right angle its glyphs are
+  rasterised at twice the size, so a 45° label stays crisp.
 
 ### Changed
 

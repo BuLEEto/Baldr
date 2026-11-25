@@ -310,7 +310,7 @@ emit_glow :: proc(verts: ^[dynamic]Vertex, g: Glow, rgba: bool) {
 	v := Vertex{color = g.color, rect = g.uv, border = {upp.x, upp.y, g.radius, 1 if rgba else 0}, kind = KIND_GLOW}
 	emit_rect(verts, v,
 		{g.rect.x - e, g.rect.y - e}, {g.rect.x + g.rect.z + e, g.rect.y + g.rect.w + e},
-		{g.uv[0] - e * upp.x, g.uv[1] - e * upp.y}, {g.uv[2] + e * upp.x, g.uv[3] + e * upp.y})
+		{g.uv[0] - e * upp.x, g.uv[1] - e * upp.y}, {g.uv[2] + e * upp.x, g.uv[3] + e * upp.y}, g.pivot, g.angle)
 }
 
 // emit_highlight appends a KIND_HIGHLIGHT quad over the top of the rect, as
@@ -327,16 +327,31 @@ emit_glyph :: proc(verts: ^[dynamic]Vertex, g: Glyph, kind: u32) {
 	v := Vertex{color = g.color, rect = g.rect, kind = kind}
 	emit_rect(verts, v,
 		{g.rect.x, g.rect.y}, {g.rect.x + g.rect.z, g.rect.y + g.rect.w},
-		{g.uv[0], g.uv[1]}, {g.uv[2], g.uv[3]})
+		{g.uv[0], g.uv[1]}, {g.uv[2], g.uv[3]}, g.pivot, g.angle)
 }
 
 @(private)
-emit_rect :: proc(verts: ^[dynamic]Vertex, v: Vertex, p0, p1, uv0, uv1: [2]f32) {
+emit_rect :: proc(verts: ^[dynamic]Vertex, v: Vertex, p0, p1, uv0, uv1: [2]f32, pivot: [2]f32 = {}, angle: f32 = 0) {
 	a, b, c, d := v, v, v, v
 	a.pos = {p0.x, p0.y}; a.uv = {uv0.x, uv0.y}
 	b.pos = {p1.x, p0.y}; b.uv = {uv1.x, uv0.y}
 	c.pos = {p1.x, p1.y}; c.uv = {uv1.x, uv1.y}
 	d.pos = {p0.x, p1.y}; d.uv = {uv0.x, uv1.y}
+	if angle != 0 { // the corners turn; the atlas is sampled as it was, which only a glyph or its glow may rely on
+		a.pos = turn_point(a.pos, pivot, angle)
+		b.pos = turn_point(b.pos, pivot, angle)
+		c.pos = turn_point(c.pos, pivot, angle)
+		d.pos = turn_point(d.pos, pivot, angle)
+	}
 	append(verts, a, b, c, a, c, d)
+}
+
+// turn_point turns `p` about `pivot` by `angle` radians, clockwise on a
+// y-down screen.
+@(private)
+turn_point :: proc "contextless" (p, pivot: [2]f32, angle: f32) -> [2]f32 {
+	cs, sn := math.cos(angle), math.sin(angle)
+	q := p - pivot
+	return pivot + {q.x * cs - q.y * sn, q.x * sn + q.y * cs}
 }
 

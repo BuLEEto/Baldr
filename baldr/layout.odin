@@ -508,6 +508,7 @@ layout_box :: proc(t: ^Tree, n: Node, d: ^Node_Data, cc: Constraints) -> [2]f32 
 	if scroll_v && is_bounded(viewport_max.y) do stretch_max.y = viewport_max.y
 
 	if L.axis == .Stack {
+		follow := scroll_follow_x(t, n, inner_max.x) if is_bounded(inner_max.x) else 0 // a table's header, moved with its rows
 		// Overlapping children, each at padding origin + its offset. With
 		// align = .Stretch children fill the bounded inner box; with .Center
 		// / .End they are aligned inside it on both axes.
@@ -540,7 +541,7 @@ layout_box :: proc(t: ^Tree, n: Node, d: ^Node_Data, cc: Constraints) -> [2]f32 
 				if is_bounded(inner_max.y) && (cover || !cross_fixed(cd, 1)) do child_c.min.y = inner_max.y
 			}
 			sz := layout_node(t, ch, child_c)
-			cd.rect.x = L.padding[3] + cd.layout.offset.x
+			cd.rect.x = L.padding[3] + cd.layout.offset.x - follow
 			cd.rect.y = L.padding[0] + cd.layout.offset.y
 			if L.align != .Start && L.align != .Stretch && is_bounded(inner_max.x) && is_bounded(inner_max.y) {
 				cd.rect.x += align_offset(L.align, inner_max.x, sz.x)

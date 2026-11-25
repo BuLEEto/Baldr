@@ -148,7 +148,7 @@ Draw_Cmd :: union {
 Draw_Rect      :: struct { rect: Rect, color: Color, color2: Color, radius, border_w: f32, border: Color, horizontal: bool, square: Corners } // color2 set (even transparent): gradient to the bottom (or right when horizontal)
 Draw_Shadow    :: struct { rect: Rect, radius, blur: f32, color: Color, square: Corners, hole: Rect } // `hole`: left clear, the see-through card over it (zero: none)
 Draw_Backdrop  :: struct { rect: Rect, radius: f32, material: Material, square: Corners, fade: f32 } // frosted glass: blur what is behind, tint, then draw; faded out by `fade` (0: shown)
-Draw_Text      :: struct { pos: [2]f32, str: string, size: f32, color: Color, wrap_w: f32, weight: Font_Weight, mono: bool, italic: bool, no_ligatures: bool, tabular: bool, tab: u8, align: Text_Align, box_w: f32, family: Family_Id } // str aliases node memory; valid until that node's text changes; wrap_w 0 = unwrapped; lines align within box_w; mono = the code face, tab = its cells per tab stop (0 = 4)
+Draw_Text      :: struct { pos: [2]f32, str: string, size: f32, color: Color, wrap_w: f32, weight: Font_Weight, mono: bool, italic: bool, no_ligatures: bool, tabular: bool, tab: u8, align: Text_Align, box_w: f32, family: Family_Id, angle: f32 } // str aliases node memory; valid until that node's text changes; wrap_w 0 = unwrapped; lines align within box_w; mono = the code face, tab = its cells per tab stop (0 = 4); angle turns it about pos (radians, clockwise on screen)
 Draw_Icon      :: struct { pos: [2]f32, icon: Icon, size: f32, color: Color } // a vendored icon, rasterised into the atlas on first use
 Draw_Wave      :: struct { pos: [2]f32, width: f32, color: Color } // a squiggle: WAVE_H tall from pos, tiled along width (spell-check underlines)
 Draw_Line      :: struct { a, b: [2]f32, width: f32, color: Color, flat: bool, snap: bool } // a straight segment with round ends, so a polyline joins itself; `flat` cuts the ends square (a chart's series, a grid rule at an angle); `snap` puts a horizontal or vertical one on whole device pixels (a guide, a pixel grid: see render.odin)
@@ -663,6 +663,21 @@ backdrop_color :: proc(t: ^Tree, n: Node) -> Color {
 
 rect_intersects :: proc "contextless" (a, b: Rect) -> bool {
 	return a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h
+}
+
+// rect_turned is the upright box around `r` turned by `angle` radians about
+// `pivot`.
+@(private)
+rect_turned :: proc "contextless" (r: Rect, pivot: [2]f32, angle: f32) -> Rect {
+	if angle == 0 do return r
+	cs, sn := math.cos(angle), math.sin(angle)
+	lo, hi := [2]f32{max(f32), max(f32)}, [2]f32{min(f32), min(f32)}
+	for c in ([4][2]f32{{r.x, r.y}, {r.x + r.w, r.y}, {r.x + r.w, r.y + r.h}, {r.x, r.y + r.h}}) {
+		q := c - pivot
+		p := pivot + {q.x * cs - q.y * sn, q.x * sn + q.y * cs} // as gpu.turn_point turns the glyphs
+		lo, hi = {min(lo.x, p.x), min(lo.y, p.y)}, {max(hi.x, p.x), max(hi.y, p.y)}
+	}
+	return {lo.x, lo.y, hi.x - lo.x, hi.y - lo.y}
 }
 
 rect_clip :: proc "contextless" (a, b: Rect) -> Rect {

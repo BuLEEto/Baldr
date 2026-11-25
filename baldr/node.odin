@@ -274,6 +274,7 @@ Tree :: struct {
 	keyboard_on:  bool,
 	anims:        map[Node]Anim_State, // running/resting tweens (anim.odin)
 	scrolls:      map[Node]Scroll_State, // scroll containers (scroll.odin)
+	scroll_follow: map[Node]Node,        // a node whose children move sideways with another's scroll: a table's header with its rows
 	sliders:      map[Node]Slider_State, // sliders (widget_controls.odin)
 	charts:       map[Node]Chart_State,  // charts: where the pointer and the keyboard are (widget_chart.odin)
 	chart_data:   map[Node]Chart_Kept,   // …and the series themselves, kept past the build that passed them
@@ -390,6 +391,7 @@ tree_init :: proc(t: ^Tree, allocator := context.allocator) {
 	when ODIN_TEST do t.debug_bounds = true // every test's views are held to their paint bounds (build.sh test fails on a fault)
 	t.anims = make(map[Node]Anim_State, allocator)
 	t.scrolls = make(map[Node]Scroll_State, allocator)
+	t.scroll_follow = make(map[Node]Node, allocator)
 	t.overlay_rules = make(map[Node]Overlay_Rule, allocator)
 	t.tables = make(map[Node]Table_State, allocator)
 	t.icon_views = make(map[Node]Icon_View_State, allocator)
@@ -479,6 +481,7 @@ tree_destroy :: proc(t: ^Tree) {
 	delete(t.bounds_faults)
 	delete(t.anims)
 	delete(t.scrolls)
+	delete(t.scroll_follow)
 	for _, &ts in t.tables do table_state_destroy(&ts)
 	delete(t.tables)
 	for _, &vs in t.icon_views {
@@ -690,6 +693,7 @@ node_free_rec :: proc(t: ^Tree, n: Node) {
 	if t.focus == n do t.focus = NODE_NONE
 	delete_key(&t.anims, n)
 	delete_key(&t.scrolls, n)
+	delete_key(&t.scroll_follow, n)
 	delete_key(&t.overlay_rules, n)
 	chart_free(t, n) // a chart's series and the line it was reading (widget_chart.odin)
 	sparkline_free(t, n)

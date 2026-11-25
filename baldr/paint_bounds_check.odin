@@ -87,5 +87,5 @@ drawn_text_rect :: proc(t: ^Tree, v: Draw_Text) -> Rect {
 		case .End:    x += v.box_w - m.x
 		}
 	}
-	return {x, v.pos.y, m.x, m.y}
+	return rect_turned({x, v.pos.y, m.x, m.y}, v.pos, v.angle)
 }

@@ -102,12 +102,35 @@ scroll_to :: proc(t: ^Tree, n: Node, off: [2]f32) -> bool {
 	if want != st.offset do st.at_end = scroll_at_end(st^, want, .Scroll_V in d.flags) // the person put it here: follow again only at the end
 	if want == st.offset do return false
 	st.shift_since_layout += want - st.offset
+	if want.x != st.offset.x do scroll_followers_dirty(t, n)
 	st.offset = want
 	st.smooth = false // any direct move ends a smooth scroll (the ticker re-arms it)
 	st.last_activity_ms = t.now_ms
 	tree_wake_at(t, t.now_ms + SCROLLBAR_LINGER_MS + 1, n)
 	mark_layout_dirty(t, n)
 	return true
+}
+
+// scroll_followers_dirty re-lays what follows `leader`'s horizontal scroll.
+@(private)
+scroll_followers_dirty :: proc(t: ^Tree, leader: Node) {
+	for f, l in t.scroll_follow do if l == leader do mark_layout_dirty(t, f)
+}
+
+// scroll_follow_x is how far `n`'s children are moved left: its leader's
+// horizontal offset, or 0 for a node that follows nothing. It is clamped
+// here, as the leader's own layout will clamp it, because `n` may be laid
+// out first: a table's header comes before its rows. `width` is `n`'s
+// inner width, which is the leader's too.
+@(private)
+scroll_follow_x :: proc(t: ^Tree, n: Node, width: f32) -> f32 {
+	l, has := t.scroll_follow[n]
+	if !has do return 0
+	st, ok := t.scrolls[l]
+	ld := node_get(t, l)
+	if !ok || ld == nil || .Scroll_H not_in ld.flags do return 0
+	view := width - ld.layout.padding[1] - ld.layout.padding[3]
+	return clamp(st.offset.x, 0, max(ld.layout.content_w - view, 0))
 }
 
 // scroll_by moves by a delta (logical px). Returns true if it moved.
@@ -128,6 +151,9 @@ scroll_event :: proc(ui: ^Ui($Msg), pos: [2]f32, delta: [2]f32, precise := false
 	for cur := hit_test(t, pos); cur != NODE_NONE; cur = node_get(t, cur).parent {
 		d := node_get(t, cur)
 		if d == nil do break
+		if leader, follows := t.scroll_follow[cur]; follows && delta.x != 0 { // sideways over a table's header pans its rows
+			if scroll_by(t, leader, {delta.x, 0}) do return true
+		}
 		if .Scroll_V in d.flags || .Scroll_H in d.flags {
 			dl := delta
 			// A wheel over a strip that only scrolls sideways scrolls it sideways.
@@ -381,6 +407,21 @@ scroll_rect_into_view :: proc(t: ^Tree, n: Node, rect: Rect, instant := false) -
 	for cur := nd.parent; cur != NODE_NONE; cur = node_get(t, cur).parent {
 		cd := node_get(t, cur)
 		if cd == nil do break
+		if leader, follows := t.scroll_follow[cur]; follows { // a table's header: shown by panning its rows
+			if lst, ok := t.scrolls[leader]; ok {
+				x0 := cd.abs.x
+				x1 := x0 + lst.viewport.x
+				dx: f32
+				if rect.x - m < x0 {
+					dx = rect.x - m - x0
+				} else if rect.x + rect.w + m > x1 {
+					dx = rect.x + rect.w + m - x1
+				}
+				to := lst.offset + {dx, 0}
+				if dx != 0 && (scroll_to(t, leader, to) if instant else scroll_to_smooth(t, leader, to)) do moved = true
+			}
+			continue
+		}
 		if .Scroll_V not_in cd.flags && .Scroll_H not_in cd.flags do continue
 		st, ok := t.scrolls[cur]
 		if !ok do continue

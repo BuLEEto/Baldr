@@ -232,9 +232,12 @@ draw_icon :: proc(p: ^Painter, icon: Icon, pos: [2]f32, size: f32, color: Color)
 
 // draw_text draws `s` with its first line's top-left at `pos` and returns
 // the size it takes. `size` 0 is the theme's body size; `wrap_width` > 0
-// wraps it. The string is copied, so a temporary one is fine.
+// wraps it. `angle` turns it about `pos`, in radians, clockwise on screen:
+// `-math.PI / 2` for a label reading up a chart's side, `-math.PI / 4` for
+// one under a crowded axis. The size returned is the upright one. The
+// string is copied, so a temporary one is fine.
 draw_text :: proc(p: ^Painter, pos: [2]f32, s: string, size: f32 = 0, color: Color = {}, weight := Font_Weight.Regular,
-	mono := false, wrap_width: f32 = 0) -> [2]f32 {
+	mono := false, wrap_width: f32 = 0, angle: f32 = 0) -> [2]f32 {
 	if s == "" do return {}
 	px := size if size > 0 else p.theme.type.body.size
 	ink := color if color.a > 0 else p.theme.color.on_surface
@@ -244,7 +247,7 @@ draw_text :: proc(p: ^Painter, pos: [2]f32, s: string, size: f32 = 0, color: Col
 		own = strings.clone(s, p.tree.allocator)
 		append(&cs.strings, own)
 	}
-	append(&p.layer.cmds, Draw_Text{pos = pos, str = own, size = px, color = painter_ink(p, ink), wrap_w = wrap_width, weight = weight, mono = mono})
+	append(&p.layer.cmds, Draw_Text{pos = pos, str = own, size = px, color = painter_ink(p, ink), wrap_w = wrap_width, weight = weight, mono = mono, angle = angle})
 	return draw_text_size(p, s, size, weight, mono, wrap_width)
 }
 

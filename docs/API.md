@@ -257,6 +257,14 @@ struct
 
 Frame_Ctx is the non-generic slice of the run loop so a platform modal loop (Win32 size/move) can drive a frame through Backend.redraw_callback.
 
+### `FIT_WAIT_MS`
+
+```odin
+FIT_WAIT_MS :: 50.0
+```
+
+FIT_WAIT_MS is the longest a FIT layer surface's frame waits for the configure its new length brings. A compositor that keeps the size it gave may send none, or one that changes nothing.
+
 ### `Output`
 
 ```odin
@@ -5000,7 +5008,7 @@ list :: proc(ui: ^Ui($Msg), count: int, row_height: f32 = 0, estimated_height: f
 
 ## widget_table.odin
 
-table is a grid with a sticky header and virtual rows: only the visible rows exist as nodes (it is a `list` underneath). Columns are fixed (`width`) or flexible (`flex`, the default); the header's dividers show as hairlines, the pointer becomes a resize cursor over them and a guide runs down the table while one is dragged; a header cell dragged sideways moves its column to another slot (a drop indicator shows where). A click on a sortable header asks the app to sort (`on_sort`; the app reorders its data). With a header cell focused, Shift+Left/Right resizes and Ctrl+Left/Right reorders, so nothing needs the pointer.
+table is a grid with a sticky header and virtual rows: only the visible rows exist as nodes (it is a `list` underneath). Columns are fixed (`width`) or flexible (`flex`, the default); the header's dividers show as hairlines, the pointer becomes a resize cursor over them and a guide runs down the table while one is dragged; a header cell dragged sideways moves its column to another slot (a drop indicator shows where). A click on a sortable header asks the app to sort (`on_sort`; the app reorders its data). With a header cell focused, Shift+Left/Right resizes and Ctrl+Left/Right reorders, so nothing needs the pointer. Columns wider together than the table scroll sideways, the header panning with the rows and the vertical bar staying in view: the wheel sideways (Shift+wheel), the horizontal bar, Left / Right in the body, or a header cell taking the keyboard.
 
 Rows are selected by click, Ctrl-click, Shift-click, and the keyboard cursor (Up/Down, Shift to extend, Space to toggle, Ctrl+A, Home/End, Page Up/Down) — the app-owned `Selection` is edited in place and `on_select` carries the cursor row; Enter or a double-click sends `on_activate`. Column order and dragged widths are the table's own state (like a scroll offset); columns are declared and cells built in the declared order regardless. Accessibility: Table named by `label`, Column_Header cells (Selected = sorted), Row (Selected) named by its first cell, Cell nodes; the table is the focusable widget.
 
@@ -5968,10 +5976,10 @@ draw_icon draws a Lucide icon `size` px square with its top-left at `pos`.
 
 ```odin
 draw_text :: proc(p: ^Painter, pos: [2]f32, s: string, size: f32 = 0, color: Color = {}, weight := Font_Weight.Regular,
-	mono := false, wrap_width: f32 = 0) -> [2]f32
+	mono := false, wrap_width: f32 = 0, angle: f32 = 0) -> [2]f32
 ```
 
-draw_text draws `s` with its first line's top-left at `pos` and returns the size it takes. `size` 0 is the theme's body size; `wrap_width` > 0 wraps it. The string is copied, so a temporary one is fine.
+draw_text draws `s` with its first line's top-left at `pos` and returns the size it takes. `size` 0 is the theme's body size; `wrap_width` > 0 wraps it. `angle` turns it about `pos`, in radians, clockwise on screen: `-math.PI / 2` for a label reading up a chart's side, `-math.PI / 4` for one under a crowded axis. The size returned is the upright one. The string is copied, so a temporary one is fine.
 
 ### `draw_text_size`
 

@@ -164,6 +164,8 @@ Glyph :: struct {
 	uv:    [4]f32, // u0, v0, u1, v1 normalised
 	page:  Page,
 	color: [4]f32,
+	angle: f32,    // radians, clockwise on screen, turned about `pivot` (device px): a rotated label; 0 is upright
+	pivot: [2]f32,
 }
 
 // Backdrop: frosted glass. Blurs everything drawn so far behind `rect`
@@ -194,6 +196,8 @@ Glow :: struct {
 	page:   Page,
 	color:  [4]f32,
 	radius: f32,
+	angle:  f32, // turned with its glyph (Glyph.angle)
+	pivot:  [2]f32,
 }
 
 // Highlight: a `width` px line of `color` along the top edge of a rounded

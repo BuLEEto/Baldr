@@ -213,6 +213,16 @@ render_text :: proc(te: ^Text_Engine, v: Draw_Text, s: f32, sink: ^Atlas_Sink, o
 	lh := text_line_height(te, v.size, v.mono, v.family)
 	asc := text_ascent(te, v.size, v.mono, v.family)
 	reach := px * 2 // how far a glyph's ink may stand off its pen position: an italic overhang, a wide mark
+	// Turned text is laid out upright and its glyphs turned about `pos`. Off
+	// a right angle a glyph is sampled between texels, so it is rasterised at
+	// twice the size and drawn at half, which keeps its edges crisp.
+	pivot := v.pos * s
+	k := f32(1)
+	vis := vis
+	if v.angle != 0 {
+		vis = NO_CLIP // what shows is worked out upright, and a turned line reaches elsewhere
+		if r := math.mod(abs(v.angle), math.PI / 2); r > 1e-4 && math.PI / 2 - r > 1e-4 do k = 2
+	}
 	for line, i in lines {
 		top := (v.pos.y + f32(i) * lh) * s
 		if top > vis.y + vis.w || top + lh * s < vis.y do continue // the whole line is above or below what shows
@@ -237,14 +247,16 @@ render_text :: proc(te: ^Text_Engine, v: Draw_Text, s: f32, sink: ^Atlas_Sink, o
 			gy := baseline - g.y_offset * s // GPOS y placement is up-positive
 			fx := math.floor(gx)
 			subpx := u8(int((gx - fx) * 4)) & 3
-			if slot, ok := glyph_slot(te, g.font, g.glyph_id, px, subpx); ok {
+			if slot, ok := glyph_slot(te, g.font, g.glyph_id, px * k, subpx); ok {
 				ensure_pages(te, sink)
 				format := runa.Atlas_Format.RGBA8 if slot.is_color else runa.Atlas_Format.Alpha8
 				append(out, gpu.Glyph{
-					rect  = {fx + slot.bearing.x, math.round(gy) + slot.bearing.y, f32(slot.px_size.x), f32(slot.px_size.y)},
+					rect  = {fx + slot.bearing.x / k, math.round(gy) + slot.bearing.y / k, f32(slot.px_size.x) / k, f32(slot.px_size.y) / k},
 					uv    = slot.uv_rect,
 					page  = te.pages[format][slot.page_index].page,
 					color = v.color,
+					angle = v.angle,
+					pivot = pivot,
 				})
 			}
 			pen += g.x_advance
@@ -378,7 +390,7 @@ glow_under :: proc(out: ^[dynamic]gpu.Cmd, start: int, glow: Glow, s: f32) {
 		c := glow.color
 		c.a *= g.color.a
 		for p in 0 ..< passes {
-			out[start + p * n + i] = gpu.Glow{rect = g.rect, uv = g.uv, page = g.page, color = c, radius = radius}
+			out[start + p * n + i] = gpu.Glow{rect = g.rect, uv = g.uv, page = g.page, color = c, radius = radius, angle = g.angle, pivot = g.pivot}
 		}
 	}
 }
