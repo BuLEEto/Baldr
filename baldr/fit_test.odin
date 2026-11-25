@@ -99,6 +99,37 @@ a_fit_dock_is_as_long_as_its_content :: proc(t: ^testing.T) {
 	testing.expect_value(t, layer_size(&fc), [2]f32{200, 48})
 }
 
+// A frame is skipped only for a length the surface has not got, since only
+// that brings a configure, and the wait for it is bounded: a compositor
+// that keeps the size it gave may answer with nothing.
+@(test)
+a_fit_surface_waits_only_for_a_configure_that_will_come :: proc(t: ^testing.T) {
+	log: Fit_Log
+	defer delete(log.asked)
+	b := fit_backend(&log)
+	ui: Ui(Fit_Msg)
+	ui_init(&ui)
+	defer ui_destroy(&ui)
+	layer := Layer_Desc{anchor = {.Bottom}}
+	dock_view(&ui, 3)
+	at := dock_length(&ui.tree, 3)
+	// configured at its content's length already: nothing to wait for
+	fc := Frame_Ctx{tree = &ui.tree, backend = &b, surface = 3, size = {at, 48}, fit = {true, false}, declared = {FIT, 48}, layer = &layer}
+	testing.expect(t, !fit_sync(&fc), "the length it has: drawn now")
+	testing.expect_value(t, fc.fit_wait_ms, 0.0)
+
+	dock_view(&ui, 5)
+	layout(&ui.tree, fc.size)
+	testing.expect(t, fit_sync(&fc), "a new length: the frame waits for its configure")
+	asked_at := fc.fit_wait_ms
+	testing.expect(t, asked_at > 0, "and says since when")
+	testing.expect(t, !fit_wait_due(&fc, asked_at + FIT_WAIT_MS - 1), "not yet")
+	testing.expect(t, fit_wait_due(&fc, asked_at + FIT_WAIT_MS), "no configure in time: the frame is drawn anyway")
+	testing.expect(t, !fit_wait_due(&fc, asked_at + 2 * FIT_WAIT_MS), "once")
+	testing.expect(t, !fit_sync(&fc), "and that frame draws at the size it has, asking nothing more")
+	testing.expect_value(t, len(log.asked), 2) // the length it had, told once, and the new one
+}
+
 // A FIT layer surface opens at a start length until its content is measured;
 // without layer shell it is a window of the usual size. A screen not known
 // yet caps it at the largest one.

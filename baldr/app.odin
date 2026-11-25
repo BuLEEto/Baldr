@@ -439,6 +439,7 @@ Frame_Ctx :: struct {
 	fit_cap:         [2]f32,            // …the most it may take: its screen less its margins (0 = no screen known)
 	fit_size:        [2]f32,            // …the size it last measured at
 	fit_layouts:     u64,               // …and the tree's layout count then
+	fit_wait_ms:     f64,               // …when it skipped a frame for the configure a new length brings (0: not waiting)
 	rolled:          [2]f32,            // a window rolled up to its title bar: the size it comes back to, and is laid out at (zero: not rolled)
 }
 
@@ -552,11 +553,13 @@ rounded_region :: proc(size: [2]f32, radius: f32, square: Corners, out: ^[dynami
 // for its popups, so the tree's layout count says it, not a dirty flag), it
 // measures the content's natural length at the surface's thickness, up to
 // its cap, and asks for that length when it isn't the one last asked for.
-// True when it asked: the frame at the old length is skipped and the
-// compositor's configure brings the next. A length the compositor settles
+// True when it asked for a length the surface has not got: the frame at the
+// old length is skipped, and the compositor's configure brings the next, or
+// FIT_WAIT_MS ends the wait (fit_wait_due). A length the compositor settles
 // on instead is kept.
 @(private)
 fit_sync :: proc(fc: ^Frame_Ctx) -> bool {
+	fc.fit_wait_ms = 0
 	b := fc.backend
 	root := node_get(fc.tree, fc.tree.root)
 	if b == nil || b.surface_set_layer == nil || fc.layer == nil || root == nil do return false
@@ -573,8 +576,30 @@ fit_sync :: proc(fc: ^Frame_Ctx) -> bool {
 	layout(fc.tree, fc.size) // measuring laid it out for itself: at its size again, and counted
 	fc.fit_size, fc.fit_layouts = fc.size, fc.tree.layouts
 	if want == fc.fit_len do return false
+	before := layer_size(fc)
 	fc.fit_len = want
-	b.surface_set_layer(b, fc.surface, fc.layer^, layer_size(fc))
+	asked := layer_size(fc)
+	if asked != before do b.surface_set_layer(b, fc.surface, fc.layer^, asked)
+	// A length the surface already has brings no configure: drawn now.
+	for i in 0 ..< 2 do if fc.fit[i] && asked[i] != fc.size[i] {
+		fc.fit_wait_ms = max(clock_ms(fc), 0.001) // 0 is not waiting
+		return true
+	}
+	return false
+}
+
+// FIT_WAIT_MS is the longest a FIT layer surface's frame waits for the
+// configure its new length brings. A compositor that keeps the size it
+// gave may send none, or one that changes nothing.
+FIT_WAIT_MS :: 50.0
+
+// fit_wait_due ends the wait once FIT_WAIT_MS has gone without the
+// configure, so the frame is drawn at the size the surface has. True when
+// it ended it.
+@(private)
+fit_wait_due :: proc(fc: ^Frame_Ctx, now_ms: f64) -> bool {
+	if fc.fit_wait_ms <= 0 || now_ms < fc.fit_wait_ms + FIT_WAIT_MS do return false
+	fc.fit_wait_ms = 0
 	return true
 }
 
@@ -2584,6 +2609,10 @@ run :: proc(app: App($State, $Msg)) -> Error {
 			t := i32(max(p.held_ms + POPUP_PLACE_WAIT_MS - clock_ms(&p.fc), 0))
 			timeout = t if timeout < 0 else min(timeout, t)
 		}
+		for c in rt.ctxs do if c.fc.fit_wait_ms > 0 { // …and a FIT surface's, FIT_WAIT_MS
+			t := i32(max(c.fc.fit_wait_ms + FIT_WAIT_MS - clock_ms(&c.fc), 0))
+			timeout = t if timeout < 0 else min(timeout, t)
+		}
 		if t := sched_timeout(&rt.sched, clock_now(&rt)); t >= 0 do timeout = t if timeout < 0 else min(timeout, t)
 		if len(rt.msgs) > 0 do timeout = 0
 		for c in rt.ctxs do if len(c.ui.msgs) > 0 do timeout = 0 // the last build queued messages (a list's visible range): handle them now
@@ -3129,6 +3158,7 @@ run :: proc(app: App($State, $Msg)) -> Error {
 				backend.surface_request_frame(backend, p.surf)
 				p.fc.frame_requested = true
 			}
+			if fit_wait_due(&c.fc, clock_ms(&c.fc)) do c.needs_frame = true // the configure it asked for never came
 			if c.needs_frame && c.fc.target != 0 && !c.fc.frame_requested {
 				backend.surface_request_frame(backend, c.surf)
 				c.fc.frame_requested = true

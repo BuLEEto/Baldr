@@ -58,6 +58,11 @@ version may break the API; every break is listed here.
   keyboard to the find field and the caret to a match.
 - A field given `on_context` heard a right-click but not the Menu key or
   Shift+F10.
+- A layer surface sized to its content (`FIT`) and opened from `update`
+  was not drawn until something else woke the app, up to a second later
+  under a clock that ticks once a second; it is drawn as soon as the
+  compositor answers. A compositor that never answers a new length no
+  longer leaves the frame waiting.
 - A click on a completion row puts it in, as Enter does; it closed the list
   and took the keyboard out of the editor.
 - A closing modal dialog no longer takes focus back from where the app put

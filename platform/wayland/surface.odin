@@ -375,7 +375,14 @@ surface_set_layer :: proc(b: ^platform.Backend, surface: platform.Surface, l: pl
 	layer_apply(s, l, size, live = true)
 	if size.x > 0 && size.y > 0 do s.default_size = size
 	debugf(st, "surface %d: layer placement changed: size %v, anchors %v, margins %v", s.id, size, l.anchor, l.margin)
-	commit_live(st, s)
+	if s.mapped {
+		commit_live(st, s)
+	} else {
+		// Not on screen yet: its first frame waits for the configure this
+		// size brings, and nothing else would commit it.
+		wl.wl_surface_commit(s.wl_surface)
+		wl.display_flush(st.display)
+	}
 	return true
 }
 
